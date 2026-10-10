@@ -3,8 +3,8 @@ services:
     image: ghcr.io/wg-ez/wg-ez:latest
     container_name: wg-ez
     ports:
-      - 51821:51821
-      - 51820:51820/udp
+      - 51821:51821 # Web UI
+      - 51820:51820/udp # WireGuard traffic
     volumes:
       - ./wg-data:/etc/wireguard
       - /lib/modules:/lib/modules:ro
