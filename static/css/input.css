@@ -1,0 +1,1872 @@
+/* wg-ez — design « grille de filets » ; source -> static/css/app.css (stage css du Dockerfile). Coins carres, filets 1px, zero style inline. */
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-display: "Archivo", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    monospace;
+}
+
+@layer base {
+  :root {
+    --bg: #f2f1ee;
+    --bg-raised: #faf9f7;
+    --bg-sunken: #e9e8e4;
+    --ink: #101014;
+    --ink-strong: #000;
+    --muted: #1010149e;
+    --line: #10101429;
+    --line-strong: #10101466;
+    /* couleurs de la demo ajustees pour WCAG AA (teintes inchangees) */
+    --faint: #10101499;
+    --app: #2a6fe0;
+    --app-ink: #1a5bc4;
+    --ok: #0d7a66;
+    --warn: #8f5308;
+    --danger: #b3261e;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+    --dur: 0.15s;
+    --nav-h: 3rem;
+    --frame: 80rem;
+    --tile-r: 1.375rem;
+    --tile: linear-gradient(
+      150deg,
+      var(--app-ink),
+      color-mix(in srgb, var(--app-ink) 55%, var(--ink-strong))
+    );
+    color-scheme: light;
+  }
+
+  html[data-theme="dark"] {
+    --bg: #0a0a0b;
+    --bg-raised: #101014;
+    --bg-sunken: #060607;
+    --ink: #f2f1ee;
+    --ink-strong: #fff;
+    --muted: #f2f1ee99;
+    --faint: #f2f1ee80;
+    --line: #f2f1ee26;
+    --line-strong: #f2f1ee66;
+    --app: #1e4fa8;
+    --app-ink: #8fb8ff;
+    --ok: #3fd6b8;
+    --warn: #e0a13a;
+    --danger: #ff6259;
+    color-scheme: dark;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    html[data-theme="system"] {
+      --bg: #0a0a0b;
+      --bg-raised: #101014;
+      --bg-sunken: #060607;
+      --ink: #f2f1ee;
+      --ink-strong: #fff;
+      --muted: #f2f1ee99;
+      --faint: #f2f1ee80;
+      --line: #f2f1ee26;
+      --line-strong: #f2f1ee66;
+      --app: #1e4fa8;
+      --app-ink: #8fb8ff;
+      --ok: #3fd6b8;
+      --warn: #e0a13a;
+      --danger: #ff6259;
+      color-scheme: dark;
+    }
+  }
+
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.5;
+    background: var(--bg);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    /* clip (pas hidden) : pas de conteneur de scroll, donc sticky preserve */
+    overflow-x: clip;
+  }
+
+  img,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  /* neutralise le border 2px outset du <button> natif (pas les champs) */
+  button {
+    border: 0;
+  }
+
+  h1,
+  h2,
+  h3,
+  p,
+  dl,
+  dd,
+  ol,
+  ul,
+  figure {
+    margin: 0;
+  }
+
+  ol,
+  ul {
+    padding: 0;
+    list-style: none;
+  }
+
+  ::selection {
+    background: var(--app);
+    color: #fff;
+  }
+}
+
+@layer components {
+  /* .frame : filets lateraux + l'UNIQUE filet bas du bloc principal */
+  .frame {
+    position: relative;
+    max-width: var(--frame);
+    margin-inline: auto;
+    border-inline: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .pad {
+    padding: 3.5rem 1.25rem;
+  }
+  @media (min-width: 48rem) {
+    .pad {
+      padding: 5rem 2.5rem;
+    }
+  }
+
+  .band {
+    padding: 1.5rem 1.25rem;
+  }
+  @media (min-width: 48rem) {
+    .band {
+      padding: 2.5rem;
+    }
+  }
+
+  .hud,
+  .nav__link,
+  .menu__cap,
+  .menu__item {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    text-transform: uppercase;
+  }
+  .hud {
+    letter-spacing: 0.15em;
+    color: var(--faint);
+  }
+
+  .muted {
+    color: var(--muted);
+  }
+  .accent {
+    color: var(--app-ink);
+  }
+
+  .lead {
+    max-width: 42rem;
+    font-size: 1.03125rem;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+  .ok {
+    color: var(--ok);
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .display {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+    color: var(--ink-strong);
+  }
+  .display--h3 {
+    font-size: clamp(1.5rem, 2.4vw, 2rem);
+    letter-spacing: -0.02em;
+  }
+
+  .btn,
+  .acts > * {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: 0;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .btn {
+    height: 3rem;
+    padding-inline: 1.5rem;
+    border: 1px solid var(--ink-strong);
+    background: var(--ink-strong);
+    color: var(--bg);
+    transition: opacity var(--dur) var(--ease);
+  }
+  .btn:hover {
+    opacity: 0.8;
+  }
+  .btn--ghost {
+    background: var(--bg);
+    color: var(--ink);
+    border-color: var(--line-strong);
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease),
+      border-color var(--dur) var(--ease);
+  }
+  .btn--ghost:hover {
+    background: var(--ink-strong);
+    color: var(--bg);
+    border-color: var(--ink-strong);
+    opacity: 1;
+  }
+  .btn--danger {
+    background: var(--bg);
+    color: var(--danger);
+    border-color: var(--danger);
+  }
+  .btn--danger:hover {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+    opacity: 1;
+  }
+  .btn[disabled] {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .btn--wrap {
+    max-width: 100%;
+    height: auto;
+    min-height: 3rem;
+    padding-block: 0.75rem;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  .grid {
+    display: grid;
+    gap: 1px;
+    background: var(--line);
+  }
+  .cell {
+    background: var(--bg);
+    min-width: 0;
+  }
+  .cols-2 {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 48rem) {
+    .cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  .mesh {
+    display: grid;
+    grid-template-columns: 1fr;
+    /* `margin-inline:-1px` fait courir la grille sur les filets lateraux du
+       cadre ; son fond opaque (`--bg`) les recouvre, il faut donc les reposer
+       a gauche ET a droite, sinon le bord droit disparait. Sans fond, `--line`
+       semi-transparent cumulerait deux alphas et ce bord paraitrait plus
+       fonce. */
+    border-top: 1px solid var(--line);
+    border-inline: 1px solid var(--line);
+    margin-inline: -1px;
+    background: var(--bg);
+  }
+  @media (min-width: 40rem) {
+    .mesh {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (min-width: 72rem) {
+    .mesh {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  /* Filet horizontal sur chaque cellule ; les filets lateraux externes sont
+     portes par `.frame`. Le filet vertical est traite juste apres. */
+  .mesh > * {
+    min-width: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+
+  /* Filet vertical uniquement entre cellules de contenu, jamais dans la queue
+     vide (`.mesh--tail`).
+     - clients : filet droit sur chaque carte, sauf en derniere colonne ou
+       `border-inline` de `.mesh` le porte deja (double sur 2px). Ciblee par
+       `:nth-of-type(<nb colonnes>n)` (les bouchons `fill-*` sont des `<div>`,
+       donc absents du comptage) ; une carte seule en derniere rangee partielle
+       garde son filet droit.
+     - `/me` : entre les deux colonnes de `.mesh--split` (>=64rem, sinon trait
+       parasite en mono-colonne mobile). */
+  @media (min-width: 40rem) {
+    .mesh > article.card {
+      border-right: 1px solid var(--line);
+    }
+    .mesh > article.card:nth-of-type(2n) {
+      border-right: 0;
+    }
+  }
+  @media (min-width: 72rem) {
+    .mesh > article.card:nth-of-type(2n) {
+      border-right: 1px solid var(--line);
+    }
+    .mesh > article.card:nth-of-type(3n) {
+      border-right: 0;
+    }
+  }
+  @media (min-width: 64rem) {
+    .mesh--split:not(.mesh--tail) > :last-child {
+      border-left: 1px solid var(--line);
+    }
+  }
+
+  /* border-top:0 : un seul trait entre deux blocs */
+  .mesh--flush {
+    border-top: 0;
+  }
+
+  .mesh--split {
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 64rem) {
+    .mesh--split {
+      grid-template-columns: 2fr 1fr;
+    }
+  }
+
+  /* Zone vide pleine hauteur sous la grille (`#lines` sur `/`, queue de
+     `.mesh--split` sur `/me`) : remplit jusqu'au footer et porte le filet bas
+     du cadre (`margin-bottom:-1px` de `.page`) ; ses cellules ne dessinent
+     aucune verticale, meme en sous-pixel. */
+  .mesh--tail {
+    border-top: 0;
+    flex: 1 0 auto;
+    grid-template-rows: 1fr;
+  }
+  #lines > :nth-child(n + 2) {
+    display: none;
+  }
+  @media (min-width: 40rem) {
+    #lines > :nth-child(2) {
+      display: block;
+    }
+  }
+  @media (min-width: 72rem) {
+    #lines > :nth-child(3) {
+      display: block;
+    }
+  }
+  .mesh--split.mesh--tail > * {
+    display: none;
+  }
+  @media (min-width: 64rem) {
+    .mesh--split.mesh--tail > * {
+      display: block;
+    }
+  }
+  /* Bouchons de fin de rangee : classes posees par le Rust selon
+     `cards.len() % 6` (ppcm des decoupages 2 et 3 colonnes) ; le CSS n'affiche
+     que ceux du breakpoint courant. Ils gardent la hauteur de rangee mais ne
+     peignent pas le filet bas (`border-bottom:0` neutralise `.mesh > *`). */
+  .fill-both,
+  .fill-3only,
+  .fill-2only {
+    display: none;
+    border-bottom: 0;
+  }
+  @media (min-width: 40rem) {
+    .fill-both,
+    .fill-2only {
+      display: block;
+    }
+  }
+  @media (min-width: 72rem) {
+    .fill-2only {
+      display: none;
+    }
+    .fill-both,
+    .fill-3only {
+      display: block;
+    }
+  }
+
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  /* filet bas porte par chaque cellule, jamais par le fond du conteneur */
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-width: 0;
+  }
+  .stack > * {
+    min-width: 0;
+    background: var(--bg);
+    border-bottom: 1px solid var(--line);
+  }
+  .stack > *:last-child {
+    border-bottom: 0;
+  }
+  .grow {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .tick {
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    pointer-events: none;
+  }
+  .tick::before,
+  .tick::after {
+    content: "";
+    position: absolute;
+    background: var(--line-strong);
+  }
+  .tick::before {
+    width: 1px;
+    top: 0;
+    bottom: 0;
+    left: 5px;
+  }
+  .tick::after {
+    height: 1px;
+    top: 5px;
+    left: 0;
+    right: 0;
+  }
+
+  .tick--half::before {
+    top: 5px;
+  }
+  .pin {
+    position: absolute;
+    z-index: 31;
+    top: -5px;
+  }
+  .pin--l {
+    left: -6px;
+  }
+  .pin--r {
+    right: -5px;
+  }
+
+  @media (max-width: 47.999rem) {
+    .section {
+      overflow-x: clip;
+    }
+  }
+
+  .nav {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    width: 100%;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 95%, transparent);
+    backdrop-filter: blur(8px);
+  }
+  .nav__in {
+    display: flex;
+    height: var(--nav-h);
+    align-items: stretch;
+    justify-content: space-between;
+    max-width: var(--frame);
+    margin-inline: auto;
+  }
+  .nav__left,
+  .nav__right {
+    display: flex;
+    min-width: 0;
+    align-items: stretch;
+  }
+  .nav__right {
+    flex: none;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding-inline: 1rem;
+    border-right: 1px solid var(--line);
+    font-family: var(--font-display);
+    font-size: 0.9375rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    color: var(--ink-strong);
+    white-space: nowrap;
+  }
+  .brand:hover {
+    opacity: 0.7;
+  }
+  .brand svg {
+    width: 1.375rem;
+    height: 1.375rem;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .nav__links {
+    display: none;
+    align-items: stretch;
+  }
+  @media (min-width: 48rem) {
+    .nav__links {
+      display: flex;
+    }
+  }
+  .nav__link {
+    display: flex;
+    align-items: center;
+    padding-inline: 0.625rem;
+    letter-spacing: 0.15em;
+    color: var(--muted);
+  }
+
+  .nav__link > span {
+    display: inline-flex;
+    align-items: center;
+    height: 1.25rem;
+    padding-inline: 6px;
+    border: 1px solid var(--line-strong);
+  }
+  .nav__link:hover {
+    color: var(--ink-strong);
+  }
+  .nav__link:hover > span,
+  .nav__link.is-on > span {
+    background: var(--ink-strong);
+    color: var(--bg);
+    border-color: var(--ink-strong);
+  }
+
+  .nav__cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding-inline: 1.25rem;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: var(--ink-strong);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .nav__cta:hover {
+    opacity: 0.8;
+  }
+  @media (max-width: 47.999rem) {
+    .nav__cta {
+      padding-inline: 0.75rem;
+      letter-spacing: 0.1em;
+    }
+  }
+
+  .icon-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    flex: none;
+    border: 0;
+    border-left: 1px solid var(--line);
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .icon-btn:hover {
+    background: var(--ink-strong);
+    color: var(--bg);
+  }
+  .icon-btn svg {
+    width: 1rem;
+    height: 1rem;
+    fill: currentColor;
+    stroke: none;
+  }
+  @media (min-width: 48rem) {
+    .icon-btn {
+      display: flex;
+    }
+  }
+  .nav__out {
+    display: none;
+  }
+  @media (min-width: 48rem) {
+    .nav__out {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      padding-inline: 1rem;
+      border: 0;
+      border-left: 1px solid var(--line);
+      background: transparent;
+      color: var(--muted);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+    }
+    .nav__out:hover {
+      background: var(--ink-strong);
+      color: var(--bg);
+    }
+  }
+
+  .iface {
+    display: none;
+    align-items: center;
+    gap: 0.5rem;
+    padding-inline: 0.75rem;
+    border-left: 1px solid var(--line);
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  @media (min-width: 48rem) {
+    .iface {
+      display: flex;
+    }
+  }
+  /* <68rem : la nav passe en defilement ; <60rem : pastille+GitHub tombent */
+  @media (max-width: 67.999rem) {
+    /* clip et NON auto : auto rognait le menu absolu, clics perdus */
+    .nav {
+      overflow-x: clip;
+    }
+
+    .nav__in {
+      width: max-content;
+      min-width: 100%;
+    }
+  }
+
+  @media (max-width: 59.999rem) {
+    .nav .icon-btn {
+      display: none;
+    }
+    .iface {
+      display: none;
+    }
+
+    .brand {
+      padding-inline: 0.625rem;
+    }
+    .nav__link {
+      padding-inline: 0.5rem;
+    }
+    .nav__out {
+      padding-inline: 0.75rem;
+    }
+  }
+
+  .menu {
+    position: relative;
+    height: 100%;
+    flex: none;
+    border-left: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  /* Tri : meme `<details>`/`.menu__panel` que la topbar, mais le resume porte
+     le libelle courant au lieu d'une icone. Pas de `border-left` : le `gap:1px`
+     du `.toolbar` (fond `--line`) porte deja le filet, sinon il serait double. */
+  .menu--sort {
+    border-left: 0;
+  }
+  .menu--sort .menu__btn {
+    gap: 0.5rem;
+    width: auto;
+    padding-inline: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .menu__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    height: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    list-style: none;
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+
+  .menu__btn::-webkit-details-marker {
+    display: none;
+  }
+  .menu__btn::marker {
+    content: "";
+  }
+  /* Survol reserve aux appareils a pointeur (le tactile garde le :hover
+     « colle » apres un tap, laissant le bouton fige). L'etat ouvert vaut pour
+     tous. */
+  @media (hover: hover) {
+    .menu__btn:hover {
+      background: var(--ink-strong);
+      color: var(--bg);
+    }
+  }
+  .menu[open] > .menu__btn {
+    background: var(--ink-strong);
+    color: var(--bg);
+  }
+  .menu__btn:focus-visible {
+    outline: 1px solid var(--app-ink);
+    outline-offset: -3px;
+  }
+  .menu__btn svg {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .menu__ico--mob {
+    display: none;
+  }
+
+  .menu__panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 60;
+    display: flex;
+    min-width: 10.5rem;
+    flex-direction: column;
+    padding: 0.25rem 0;
+    border: 1px solid var(--line-strong);
+    background: var(--bg-raised);
+  }
+
+  .menu__cap {
+    padding: 0.5rem 0.75rem 0.25rem;
+    color: var(--faint);
+    letter-spacing: 0.15em;
+  }
+
+  .menu__cap ~ .menu__cap {
+    margin-top: 0.25rem;
+    border-top: 1px solid var(--line);
+  }
+  .menu__item {
+    display: flex;
+    align-items: center;
+    padding: 0.4375rem 0.75rem;
+    letter-spacing: 0.12em;
+    white-space: nowrap;
+    color: var(--muted);
+    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+  }
+  .menu__item:hover {
+    background: var(--ink-strong);
+    color: var(--bg);
+  }
+  .menu__item:focus-visible {
+    outline: 1px solid var(--app-ink);
+    outline-offset: -1px;
+  }
+
+  .menu__item.is-on {
+    box-shadow: inset 2px 0 0 var(--app-ink);
+    background: color-mix(in srgb, var(--app-ink) 12%, transparent);
+    color: var(--ink-strong);
+    font-weight: 700;
+  }
+
+  /* Un seul <details> joue deux roles : « Apparence » en desktop (glyphe
+     contraste) et menu principal en mobile (hamburger + pages du site).
+     Regles placees APRES `.menu__item` — a specificite egale, l'ordre source
+     tranche, donc `display:none` doit suivre. */
+  .menu__nav,
+  .menu__item--out {
+    display: none;
+  }
+
+  @media (max-width: 47.999rem) {
+    .menu__ico--desk {
+      display: none;
+    }
+    .menu__ico--mob {
+      display: block;
+    }
+    /* En mobile le menu passe APRES `.nav__cta` (Nouveau client / Connexion),
+       sans toucher au DOM (en desktop l'ordre d'origine est conserve). Ancre
+       `right:0`, place en dernier il reste colle au bord droit du viewport. */
+    .menu {
+      order: 1;
+    }
+    .menu__nav {
+      display: flex;
+      flex-direction: column;
+      padding-bottom: 0.25rem;
+      margin-bottom: 0.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+    .menu__item--out {
+      display: flex;
+      width: 100%;
+      margin-top: 0.25rem;
+      border-top: 1px solid var(--line);
+      background: transparent;
+      text-align: start;
+      cursor: pointer;
+    }
+  }
+
+  @media (max-width: 47.999rem) {
+    .menu__btn {
+      width: 2.75rem;
+    }
+    .menu__panel {
+      min-width: 9.5rem;
+      /* Garde-fou : jamais plus large que le viewport, meme libelle long. */
+      max-width: calc(100vw - 0.5rem);
+    }
+    .menu__item {
+      padding: 0.5rem 0.625rem;
+    }
+  }
+
+  .banners {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .banner,
+  .eyebrow__in,
+  .foot__bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .banner {
+    padding: 0.625rem 1.25rem;
+    border-bottom: 1px solid var(--line);
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+  }
+  @media (min-width: 48rem) {
+    .banner {
+      padding-inline: 2.5rem;
+    }
+  }
+  .banner--warn {
+    background: color-mix(in srgb, var(--danger) 8%, transparent);
+  }
+  .banner--warn .banner__text {
+    color: var(--danger);
+  }
+  .banner__text {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    overflow-wrap: anywhere;
+  }
+
+  .main {
+    display: block;
+    flex: 1 0 auto;
+    padding-bottom: 3rem;
+  }
+  /* toutes les pages enveloppent via .page ; un seul filet bas (le cadre) */
+  .main:has(.page) {
+    padding-bottom: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .main:has(.page) > .section {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .main:has(.page) .frame {
+    flex: 1 0 auto;
+    /* width:100% obligatoire en item flex (sinon le cadre se retracte) */
+    width: 100%;
+    /* Colonne flex : `.page` remplit le cadre etire ; sans elle le vide
+       sous `#grid` serait hors `.page`, sans filet lateral interne. */
+    display: flex;
+    flex-direction: column;
+  }
+  .page {
+    flex: 1 0 auto;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 0;
+  }
+  .page .mesh:last-child {
+    margin-bottom: -1px;
+  }
+  .main:has(.page) + .foot {
+    border-top: 0;
+  }
+  .section {
+    position: relative;
+  }
+  .section__rule {
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 1px;
+    background: var(--line);
+  }
+
+  .eyebrow {
+    position: sticky;
+    top: var(--nav-h);
+    z-index: 30;
+    border-block: 1px solid var(--line);
+    background: color-mix(in srgb, var(--bg) 60%, transparent);
+    backdrop-filter: blur(12px);
+  }
+  .eyebrow__in {
+    padding: 0.75rem 1.25rem;
+  }
+  @media (min-width: 48rem) {
+    .eyebrow__in {
+      padding-inline: 2.5rem;
+    }
+  }
+  .eyebrow__num,
+  .eyebrow__slash {
+    color: var(--faint);
+  }
+  .eyebrow__slash {
+    margin-inline: 0.5rem;
+  }
+
+  .eyebrow__title,
+  .card__name,
+  .card__ip,
+  .kv dd,
+  .wizard__l {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .eyebrow__title {
+    min-width: 0;
+    color: var(--muted);
+  }
+  .eyebrow__aside {
+    display: none;
+    flex: none;
+    color: var(--faint);
+  }
+  @media (min-width: 40rem) {
+    .eyebrow__aside {
+      display: block;
+    }
+  }
+  /* .eyebrow--flat non sticky : sinon masque le chapeau sticky */
+  .eyebrow--flat {
+    position: static;
+    border-top: 0;
+    background: var(--bg);
+    backdrop-filter: none;
+  }
+
+  a:focus-visible,
+  button:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--app-ink);
+    outline-offset: 2px;
+  }
+  .field:focus-visible {
+    outline: 1px solid var(--app-ink);
+    outline-offset: -1px;
+  }
+
+  .hero__mark {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+
+  /* `.oops__code` (page d'erreur) et `.hero__logo` (login) partagent la meme
+     tuile (degrade/rayon/ombre) : selecteur groupe pour un rendu iso volontaire. */
+  .hero__logo,
+  .oops__code {
+    display: grid;
+    place-items: center;
+    width: 6rem;
+    height: 6rem;
+    border: 0;
+    border-radius: var(--tile-r);
+    background: var(--tile);
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28);
+    color: #fff;
+  }
+  @media (min-width: 48rem) {
+    .hero__logo,
+    .oops__code {
+      width: 7rem;
+      height: 7rem;
+    }
+  }
+  .hero__logo svg {
+    width: 52%;
+    height: 52%;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .hero__name {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .hero__wordmark {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+    color: var(--ink-strong);
+  }
+
+  /* Pas de filets lateraux : `.frame` les porte deja (sinon deux traits
+     adjacents). `background-clip` borne le fond `--line` (qui porte le gap de
+     1px entre recherche et tri) au padding-box, sinon il s'etend sous les
+     filets haut/bas, qui paraissent plus fonces. */
+  .toolbar {
+    display: flex;
+    gap: 1px;
+    height: 3rem;
+    border-block: 1px solid var(--line);
+    background: var(--line);
+    background-clip: padding-box;
+  }
+  .toolbar > * {
+    background: var(--bg);
+    min-width: 0;
+  }
+
+  .field {
+    width: 100%;
+    min-width: 0;
+    height: 2.75rem;
+    padding: 0 0.75rem;
+    border: 1px solid var(--line);
+    border-radius: 0;
+    background: var(--bg);
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+  }
+  .toolbar .field {
+    height: 100%;
+    border: 0;
+  }
+  .field:focus {
+    outline: 1px solid var(--app-ink);
+    outline-offset: -1px;
+  }
+  /* Famille IP indisponible : champ grise. `disabled` empeche aussi la
+     soumission, donc la valeur stockee en base n'est jamais ecrasee. */
+  .field:disabled {
+    background: var(--bg-sunken);
+    color: var(--faint);
+    cursor: not-allowed;
+  }
+  .flabel:has(.field:disabled) .hud {
+    opacity: 0.5;
+  }
+  .field--area {
+    height: auto;
+    min-height: 5.5rem;
+    padding: 0.6rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    resize: vertical;
+  }
+
+  .card,
+  .wizard__i,
+  .foot__col {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    background: var(--bg);
+  }
+  .card {
+    position: relative;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+  /* Carte entierement cliquable (lien vers les settings du client) : le lien
+     du nom se deploie en calque (pseudo-element) sur toute la carte ; `.acts`
+     reste au-dessus (z-index) pour garder son propre clic. */
+  .card__name::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+  }
+  /* Survol de la carte : voile tres leger sur tout le bloc (le fond clair
+     fonce en theme clair, inverse en sombre). Pose au-dessus du contenu
+     (z-index 3) mais `pointer-events:none` : les clics traversent. */
+  .card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    background: color-mix(in srgb, var(--ink) 4%, transparent);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .card:hover::before {
+    opacity: 1;
+  }
+  .card__top {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+  }
+  .card__id {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .card__name,
+  .empty h2,
+  .panel__t,
+  .wizard__l {
+    font-family: var(--font-display);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    color: var(--ink-strong);
+  }
+  .card__name {
+    display: block;
+    font-size: 1.0625rem;
+  }
+  .card__ip {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--faint);
+  }
+  .card__tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .avatar {
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: none;
+    object-fit: cover;
+  }
+  .avatar-initial {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    background: var(--bg-sunken);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    color: var(--ink-strong);
+  }
+
+  .kv,
+  .acts,
+  .wizard {
+    display: grid;
+    gap: 1px;
+    border: 1px solid var(--line);
+    background: var(--line);
+    /* `background-clip` borne le fond `--line` (qui porte les filets internes
+       du gap:1px) au padding-box, sinon il passe sous le filet exterieur et
+       ce dernier, deux fois semi-transparent, parait plus fonce. */
+    background-clip: padding-box;
+  }
+  .kv > div {
+    display: flex;
+    gap: 1.5rem;
+    align-items: baseline;
+    justify-content: space-between;
+    min-width: 0;
+    padding: 0.7rem 0.75rem;
+    background: var(--bg);
+  }
+  .kv dt {
+    flex: none;
+    color: var(--faint);
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .kv dd {
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--ink-strong);
+  }
+
+  .io {
+    display: flex;
+    gap: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--ink-strong);
+    font-variant-numeric: tabular-nums;
+  }
+  .io b {
+    color: var(--faint);
+    font-weight: 500;
+    letter-spacing: 0.12em;
+  }
+
+  .empty {
+    grid-column: 1 / -1;
+    padding: 3.5rem 1.5rem;
+    background: var(--bg);
+    text-align: center;
+  }
+  .empty h2 {
+    font-size: 1.5rem;
+  }
+  .empty p {
+    margin: 0.5rem auto 1.5rem;
+    max-width: 30rem;
+    color: var(--muted);
+  }
+
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    padding: 1.5rem 1.25rem;
+    background: var(--bg);
+  }
+
+  .panel > .tag,
+  .panel > .pill {
+    align-self: flex-start;
+  }
+  @media (min-width: 48rem) {
+    .panel {
+      padding: 2.5rem;
+    }
+  }
+  .panel__head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    row-gap: 0.5rem;
+    column-gap: 1rem;
+    padding-bottom: 0.75rem;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel__t {
+    font-size: 1.125rem;
+  }
+
+  .panel--card {
+    margin-top: 1.5rem;
+    border: 1px solid var(--line);
+  }
+
+  .panel--danger {
+    background: color-mix(in srgb, var(--danger) 5%, var(--bg));
+  }
+  .panel--danger .panel__t {
+    color: var(--danger);
+  }
+
+  .form {
+    display: grid;
+    gap: 1rem;
+    /* minmax(0,1fr) : sinon un bouton nowrap elargit la piste (scroll) */
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .form-2 {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 40rem) {
+    .form-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  .flabel {
+    display: grid;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  /* Interrupteur a etat (page admin) : la case native reste le controle de
+     formulaire mais est masquee ; le rendu vient de `.switch__track`, qui
+     passe a `--ok` une fois coche (aucune nouvelle couleur : `--ok` est deja
+     l'etat « actif » des `.pill--live` et des etapes franchies du wizard). */
+  .switch {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    font-size: 0.875rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .switch input {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .switch__track {
+    position: relative;
+    flex: none;
+    width: 2.25rem;
+    height: 1.25rem;
+    border: 1px solid var(--line-strong);
+    background: var(--bg-sunken);
+    transition: border-color var(--dur) var(--ease),
+      background var(--dur) var(--ease);
+  }
+  .switch__track::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 0.75rem;
+    height: 0.75rem;
+    transform: translateY(-50%);
+    background: var(--faint);
+    transition: transform var(--dur) var(--ease),
+      background var(--dur) var(--ease);
+  }
+  .switch input:checked + .switch__track {
+    border-color: var(--ok);
+    background: color-mix(in srgb, var(--ok) 18%, var(--bg));
+  }
+  .switch input:checked + .switch__track::after {
+    transform: translate(calc(1.5rem - 6px), -50%);
+    background: var(--ok);
+  }
+  .switch input:focus-visible + .switch__track {
+    outline: 2px solid var(--app-ink);
+    outline-offset: 2px;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    padding-top: 0.25rem;
+  }
+
+  /* un seul filet, cellules --bg espacees d'1px ; jamais de bordure propre */
+  .acts {
+    position: relative;
+    z-index: 2;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-top: auto;
+  }
+  .acts > * {
+    min-width: 0;
+    min-height: 2.25rem;
+    padding: 0 0.75rem;
+    border: 0;
+    background: var(--bg);
+    color: var(--muted);
+    overflow: hidden;
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .acts > *:hover {
+    background: var(--ink-strong);
+    color: var(--bg);
+  }
+  .acts > *:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
+
+  .acts > *.acts--wrap {
+    padding-block: 0.5rem;
+    white-space: normal;
+    text-align: center;
+    line-height: 1.5;
+  }
+
+  pre {
+    margin: 0;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1.65;
+    color: var(--ink);
+  }
+
+  .qr {
+    width: 10rem;
+    height: 10rem;
+    padding: 0.5rem;
+    background: #fff;
+  }
+  .qr svg {
+    width: 100%;
+    height: 100%;
+  }
+
+  .wizard {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .wizard__i {
+    gap: 0.5rem;
+    padding: 0.75rem;
+  }
+  .wizard__n {
+    color: var(--faint);
+    font-family: var(--font-mono);
+    font-size: 0.5625rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+  .wizard__l {
+    font-size: 0.9375rem;
+  }
+
+  .wizard__i.is-done .wizard__n {
+    color: var(--ok);
+  }
+
+  .wizard__i.is-on {
+    background: var(--app);
+  }
+  .wizard__i.is-on .wizard__n {
+    color: color-mix(in srgb, #fff 75%, transparent);
+  }
+  .wizard__i.is-on .wizard__l {
+    color: #fff;
+  }
+
+  /* .totp : jamais .stack (filets parasites + gap 0) */
+  .totp {
+    display: grid;
+    gap: 1rem;
+    min-width: 0;
+  }
+  #totp-slot {
+    display: grid;
+    min-width: 0;
+  }
+
+  #totp-slot:empty {
+    display: none;
+  }
+
+  .panel:has(#totp-box) #totp-start {
+    display: none;
+  }
+  /* .totp .kv en colonne : secret 32 chars enroule au lieu d'etre tronque */
+  .totp .kv {
+    width: 100%;
+  }
+  .totp .kv > div {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .totp .secret {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+    text-align: left;
+    font-size: 0.8125rem;
+    line-height: 1.7;
+  }
+
+  .kv--flush {
+    gap: 0;
+    border: 0;
+    background: transparent;
+  }
+  .kv--flush > div {
+    padding-inline: 0;
+  }
+
+  .narrow {
+    max-width: 26rem;
+    margin-inline: auto;
+  }
+
+  .narrow--wide {
+    max-width: 44rem;
+    margin-inline: auto;
+  }
+
+  /* Page d'erreur centree : `align-items:center` + `text-align:center`
+     centrent la tuile, le titre ET la rangee `.actions` (dont la boite se
+     reduit a son contenu). Ailleurs `.actions` reste alignee a gauche dans
+     le flux d'un formulaire. */
+  .oops {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 5rem 1.25rem;
+    text-align: center;
+  }
+  .oops__code {
+    font-family: var(--font-display);
+    font-size: 2rem;
+    font-weight: 500;
+    letter-spacing: -0.03em;
+  }
+
+  .foot {
+    border-top: 1px solid var(--line);
+  }
+
+  .foot__frame {
+    max-width: var(--frame);
+    margin-inline: auto;
+    border-inline: 1px solid var(--line);
+  }
+  .foot__in {
+    display: grid;
+    grid-template-columns: 1fr;
+    background: var(--bg);
+  }
+  @media (min-width: 48rem) {
+    .foot__in {
+      grid-template-columns: 2fr 1fr;
+    }
+  }
+  /* filet par bordure, pas par gap:1px (gap = 2px au zoom 125/150%) */
+  @media (min-width: 48rem) {
+    .foot__in > * + * {
+      border-left: 1px solid var(--line);
+    }
+  }
+  @media (max-width: 47.999rem) {
+    .foot__in > * + * {
+      border-top: 1px solid var(--line);
+    }
+  }
+
+  .foot__col {
+    padding: 1.5rem 1.25rem;
+  }
+  @media (min-width: 48rem) {
+    .foot__col {
+      padding: 2rem 2.5rem;
+    }
+  }
+
+  .foot .brand {
+    align-self: flex-start;
+    padding: 0;
+    border: 0;
+  }
+  .foot__tag {
+    max-width: 30rem;
+    margin-top: 0.875rem;
+    font-size: 0.875rem;
+    line-height: 1.65;
+    color: var(--muted);
+  }
+
+  .foot__state {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+  .foot__state b {
+    font-weight: 600;
+    color: var(--ink-strong);
+  }
+  .foot__col ul {
+    display: flex;
+    flex-direction: column;
+    gap: 0.625rem;
+    margin-top: 1rem;
+  }
+  .foot__col a {
+    color: var(--muted);
+    font-size: 0.875rem;
+    overflow-wrap: anywhere;
+    transition: color var(--dur) var(--ease);
+  }
+  .foot__col a:hover {
+    color: var(--ink-strong);
+  }
+  .foot__bottom {
+    flex-wrap: wrap;
+    padding: 1rem 1.25rem;
+    border-top: 1px solid var(--line);
+    background: var(--bg);
+  }
+  @media (min-width: 48rem) {
+    .foot__bottom {
+      padding-inline: 2.5rem;
+    }
+  }
+
+  .toasts {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .toast {
+    max-width: 20rem;
+    padding: 0.6rem 1rem;
+    background: var(--ink-strong);
+    color: var(--bg);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+  }
+
+  /* une seule <dialog> native ; corps rempli par app.js */
+  .modal {
+    width: min(92vw, 30rem);
+    max-width: none;
+    max-height: calc(100dvh - 2rem);
+    padding: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: 0;
+    background: var(--bg);
+    color: var(--ink);
+    overflow: auto;
+  }
+
+  .modal::backdrop {
+    background: color-mix(in srgb, var(--bg-sunken) 78%, transparent);
+    backdrop-filter: blur(2px);
+  }
+  .modal__in {
+    position: relative;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+  }
+  .modal__t {
+    padding-inline-end: 2rem;
+  }
+
+  .modal__x {
+    position: absolute;
+    top: 0.75rem;
+    right: 0.75rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--line);
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+  }
+  .modal__x:hover {
+    background: var(--ink-strong);
+    color: var(--bg);
+  }
+  .modal__body {
+    display: grid;
+    gap: 1rem;
+    justify-items: center;
+    min-width: 0;
+  }
+
+  .modal__f {
+    display: grid;
+    gap: 1rem;
+    width: 100%;
+    min-width: 0;
+  }
+  .modal__f .btn {
+    width: 100%;
+  }
+
+  .qr--modal {
+    width: min(90vw, 26.25rem);
+    height: auto;
+    aspect-ratio: 1;
+  }
+
+  .note {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    line-height: 1.7;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--faint);
+  }
+
+  .pill,
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    font-family: var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .pill {
+    gap: 0.375rem;
+    padding: 2px 8px;
+    background: var(--bg);
+    color: var(--muted);
+    font-size: 0.625rem;
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    flex: none;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .dot--live {
+    animation: pulse-dot 2s var(--ease) infinite;
+  }
+
+  .tag {
+    padding: 0 6px;
+    color: var(--faint);
+    font-size: 0.5625rem;
+  }
+  .pill--bad {
+    border-color: color-mix(in srgb, var(--danger) 45%, transparent);
+    color: var(--danger);
+  }
+  /* modificateurs groupes APRES .pill/.tag (doivent gagner) */
+  .pill--live,
+  .tag--on {
+    border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+    color: var(--ok);
+  }
+  .pill--warn {
+    border-color: color-mix(in srgb, var(--warn) 45%, transparent);
+    color: var(--warn);
+  }
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}

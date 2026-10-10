@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+{% import "partials/chrome.html" as chrome %}
+<html lang="{{ base.lang }}" data-theme="{{ base.theme }}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="htmx-config" content='{"includeIndicatorStyles":false}' />
+    <title>{{ base.title }} · wg-ez</title>
+    <link rel="icon" href="/static/img/favicon.svg" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/js/app.js" defer></script>
+  </head>
+  <body data-lang="{{ base.lang }}">
+    {% if base.insecure %}
+      <div class="banners">
+        {{ chrome::banner(base.tr.b_insecure) }}
+      </div>
+    {% endif %}
+
+    <nav class="nav">
+      <div class="nav__in">
+        <div class="nav__left">
+          {{ chrome::brand_link() }}
+          {% if base.username != "" %}
+            {# `base.nav_on` est pose par la page (`Base::nav`) : discriminant
+               explicite. Rendu par `chrome::nav_links`. #}
+            {{ chrome::nav_links(base.nav_on, base.is_admin, base.tr.nav_clients, base.tr.nav_admin, base.tr.nav_me) }}
+          {% endif %}
+        </div>
+        <div class="nav__right">
+          {% if base.username != "" %}
+            {# Le long-poll vit dans la topbar (`partials/peers.html`), donc
+               disponible sur TOUTES les pages authentifiees. La grille de `/`
+               n'ecoute que l'evenement `refreshGridLive` pousse d'ici. #}
+            {% include "partials/peers.html" %}
+          {% endif %}
+          {#
+            Theme + langue : UN seul `<details>`, zero JS.
+
+            Chaque choix est un lien vers la MEME page (`?theme=…` / `?lang=…`,
+            les autres query params sont conserves) : `page_prefs` resout la
+            query, rend la valeur ET pose le cookie (Max-Age 1 an). La
+            persistance ne depend donc pas du navigateur — sans JS (ou si le
+            script echouait), la valeur restait fausse. Cliquer un choix
+            navigue, donc le menu se referme de lui-meme au re-rendu.
+          #}
+          <details class="menu">
+            <summary class="menu__btn" title="{{ base.tr.h_menu }}" aria-label="{{ base.tr.h_menu }}">
+              {# Deux glyphes pour UN seul menu : en desktop le glyphe reste
+                 « Apparence » ; en mobile (<48rem) la nav disparait, le glyphe
+                 devient un hamburger et le menu porte AUSSI les pages. #}
+              <svg class="menu__ico menu__ico--desk" viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 3v18" />
+                <path d="M12 3a9 9 0 0 1 0 18" />
+              </svg>
+              <svg class="menu__ico menu__ico--mob" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3.5 7h17M3.5 12h17M3.5 17h17" />
+              </svg>
+            </summary>
+            <div class="menu__panel">
+              {# Pages du site : `.nav__links` disparait <48rem (pas de place) ;
+                 on les remonte ici via `chrome::menu_nav`. `.menu__nav` est
+                 masque en desktop ou la nav suffit. #}
+              {% if base.username != "" %}
+                {{ chrome::menu_nav(base.nav_on, base.is_admin, base.tr.nav_clients, base.tr.nav_admin, base.tr.nav_me) }}
+              {% endif %}
+              <p class="menu__cap">{{ base.tr.h_theme }}</p>
+              <a class="menu__item{% if base.theme == "system" %} is-on{% endif %}" href="?lang={{ base.lang }}&amp;theme=system"{% if base.theme == "system" %} aria-current="true"{% endif %}>{{ base.tr.h_t_system }}</a>
+              <a class="menu__item{% if base.theme == "light" %} is-on{% endif %}" href="?lang={{ base.lang }}&amp;theme=light"{% if base.theme == "light" %} aria-current="true"{% endif %}>{{ base.tr.h_t_light }}</a>
+              <a class="menu__item{% if base.theme == "dark" %} is-on{% endif %}" href="?lang={{ base.lang }}&amp;theme=dark"{% if base.theme == "dark" %} aria-current="true"{% endif %}>{{ base.tr.h_t_dark }}</a>
+              <p class="menu__cap">{{ base.tr.h_lang }}</p>
+              <a class="menu__item{% if base.lang == "en" %} is-on{% endif %}" href="?lang=en&amp;theme={{ base.theme }}"{% if base.lang == "en" %} aria-current="true"{% endif %}>EN</a>
+              <a class="menu__item{% if base.lang == "fr" %} is-on{% endif %}" href="?lang=fr&amp;theme={{ base.theme }}"{% if base.lang == "fr" %} aria-current="true"{% endif %}>FR</a>
+              {# Logout mobile : `.nav__out` est masque <48rem ; on le remet ici
+                 via `chrome::logout_btn(_, true)`. #}
+              {% if base.username != "" %}
+                {{ chrome::logout_btn(base.tr.nav_logout, true) }}
+              {% endif %}
+            </div>
+          </details>
+          {% if base.username != "" %}
+            {{ chrome::logout_btn(base.tr.nav_logout, false) }}
+          {% else %}
+            {{ chrome::login_cta(base.tr.nav_login) }}
+          {% endif %}
+          {% if base.is_admin %}
+            {{ chrome::new_cta(base.tr.nav_new, base.tr.m_name) }}
+          {% endif %}
+        </div>
+      </div>
+    </nav>
+
+    <main class="main" id="top">
+      <section class="section">
+        <span class="section__rule" aria-hidden="true"></span>
+        <div class="frame">
+          <span class="pin pin--l tick tick--half" aria-hidden="true"></span>
+          <span class="pin pin--r tick tick--half" aria-hidden="true"></span>
+
+          {# Sourcil sticky de section : structure unique rendue par
+             `chrome::eyebrow` (les pages ne fournissent que `Base::eyebrow`). #}
+          {{ chrome::eyebrow(base.eb_num, base.title, base.eb_aside) }}
+
+          {% block content %}{% endblock %}
+        </div>
+      </section>
+    </main>
+
+    {# Le footer est le seul bloc pleine largeur ; son CONTENU suit le cadre
+       (`.foot__frame` = meme largeur + memes filets que `.frame` et la nav). #}
+    <footer class="foot">
+      <div class="foot__frame">
+        <div class="foot__in">
+          <div class="foot__col">
+            {{ chrome::brand_link() }}
+            <p class="foot__tag">{{ base.tr.f_tagline }}</p>
+            {# Etat de l'interface : la pastille de la nav est sticky en haut,
+               elle ne suit pas le defilement jusqu'ici. #}
+            <p class="foot__state">
+              <i class="dot{% if base.iface_up %} dot--live ok{% endif %}"></i>
+              <b>{{ base.iface }}</b>
+              {% if base.iface_up %}{{ base.tr.h_up }}{% else %}{{ base.tr.h_down }}{% endif %}
+            </p>
+          </div>
+          <div class="foot__col">
+            <p class="hud">{{ base.tr.f_res }}</p>
+            <ul>
+              <li><a href="/metrics/prometheus">/metrics/prometheus</a></li>
+              <li><a href="/metrics/json">/metrics/json</a></li>
+            </ul>
+          </div>
+        </div>
+        {# La version n'apparait qu'ici. #}
+        <div class="foot__bottom">
+          <p class="hud">{{ base.tr.f_version }} <span class="num">{{ base.version }}</span></p>
+          <p class="hud">wg-quick · wg syncconf · iptables</p>
+        </div>
+      </div>
+    </footer>
+
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    {# UNE seule modale native pour toute l'UI (`showModal()` : centrage,
+       `Escape`, piege de focus et `::backdrop` donnes par le navigateur). Le
+       corps est rempli par `app.js` (jamais d'`innerHTML` de template, donc
+       zero texte en dur cote JS) ; le titre vient du bouton declencheur, donc
+       toujours traduit. #}
+    <dialog id="modal" class="modal" aria-labelledby="modal-t" data-cancel="{{ base.tr.m_cancel }}">
+      <div class="modal__in">
+        <button class="modal__x" type="button" aria-label="×" title="×">×</button>
+        <h2 id="modal-t" class="modal__t display--h3"></h2>
+        <div class="modal__body"></div>
+      </div>
+    </dialog>
+  </body>
+</html>

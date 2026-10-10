@@ -1,0 +1,74 @@
+[package]
+name = "wg-ez"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+description = "Serveur WireGuard + UI + CLI offline, un seul binaire statique musl"
+license = "MIT"
+repository = "https://github.com/wg-ez/wg-ez"
+
+[lib]
+name = "wgez"
+path = "src/lib.rs"
+
+[[bin]]
+name = "wg-ez"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false
+
+# Garde la crypto et le HTTP rapides : toutes les dependances en opt-level 2.
+[profile.release.package."*"]
+opt-level = 2
+
+[dependencies]
+# HTTP/1.0, HTTP/1.1 et HTTP/2 en clair (h2c, prior knowledge) via `axum::serve`.
+axum = { version = "0.8", features = ["http1", "http2", "query", "form", "json", "tokio", "matched-path", "original-uri"] }
+# Cookies et typed headers pour les sessions.
+axum-extra = { version = "0.12", features = ["cookie"] }
+# Middlewares, default-features coupees.
+tower = { version = "0.5", default-features = false }
+tower-http = { version = "0.7", features = ["trace", "normalize-path"] }
+hyper = { version = "1.12", default-features = false, features = ["http1", "http2", "server"] }
+http = "1"
+# Runtime single-thread (current_thread a l'init) ; tout blocage via spawn_blocking.
+tokio = { version = "1", features = ["rt", "net", "time", "signal", "sync", "fs", "macros"] }
+# Templates compiles, zero cout au runtime.
+askama = "0.16"
+# SQLite amalgame compile dans le binaire (seul C autorise).
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Uniquement pour la constante `O_NOFOLLOW` (refus d'ecrire a travers un lien
+# symbolique). `libc` est deja compilee de facon transitive (rusqlite/tokio) :
+# cout de build nul, aucun `unsafe` requis pour lire une constante.
+libc = "0.2"
+# Crypto 100 % Rust, sans TLS ni lib systeme. Argon2id regle a m=19456, t=2, p=1 au runtime.
+argon2 = "0.6"
+rand = "0.10"
+sha2 = "0.11"
+# SHA-1 uniquement pour le TOTP RFC 6238.
+sha1 = "0.11"
+hmac = "0.13"
+base64 = "0.23"
+subtle = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Gestion des dates ISO-8601 (leger, avec std + parsing + formatting + serde).
+time = { version = "0.3", features = ["std", "parsing", "formatting", "serde", "macros"] }
+ipnet = "2"
+# SVG uniquement : `image` (et sa stack) est inutile, le PNG est fait cote client.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+percent-encoding = "2"
+thiserror = "2"
+tracing = "0.1"
+# Sans ansi meme en dev pour rester minimal (spec : sans ansi en release).
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt"] }
+flate2 = "1"
+
+[build-dependencies]
+flate2 = "1"

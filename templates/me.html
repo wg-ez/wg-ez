@@ -1,0 +1,16 @@
+{% extends "layout.html" %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  {#
+    Apres confirm/remove 2FA, le handler renvoie un trigger `refreshMe` (meme
+    motif que `refreshGrid` sur l'accueil) : `GET /me` re-render ce bloc sans
+    rechargement page. Pas de `hx-select` ici : il s'herite aux formulaires
+    enfants et vidait leurs propres swaps — le serveur renvoie le partiel
+    `me_inner` aux appelants htmx, comme `GET /` renvoie `grid`. `hx-vals` lang
+    via `ui::lang_vals`.
+  #}
+  <div class="page" id="me-page" hx-get="/me" hx-target="#me-page" hx-swap="innerHTML" hx-trigger="refreshMe from:body" {{ ui::lang_vals(base.lang) }}>
+    {% include "partials/me_inner.html" %}
+  </div>
+{% endblock %}

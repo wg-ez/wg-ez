@@ -1,0 +1,6 @@
+{% extends "layout.html" %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  {{ ui::oops("404", t_e404, t_back_home) }}
+{% endblock %}

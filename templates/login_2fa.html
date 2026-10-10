@@ -1,0 +1,36 @@
+{% extends "layout.html" %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  <div class="page">
+    <div class="pad">
+      {# `.narrow` (26 rem, carte login/2FA seule), a ne pas confondre avec
+         `.narrow--wide` du setup. #}
+      <div class="narrow">
+        <section class="panel panel--card">
+          {# Titre-carte `h1.display` : `ui::phead_h1` (variante NIVEAU PAGE),
+             chapeau « version X » pre-calcule cote Rust. Pas de fusion avec
+             `login.html` : login porte un `hero__mark` + bandeau
+             `DISABLE_PASSWORD_AUTH` que 2FA n'a pas, et les formulaires
+             divergent. #}
+          {{ ui::phead_h1(base.title, t_version) }}
+
+          {# `method="post" + action` (repli sans JS) ET `hx-post` (htmx) : le
+             `<form>` reste inline (pas de macro). Le pending opaque vit dans le
+             cookie `wg-ez-pending` (portee `/api/auth`, HttpOnly) : aucun champ
+             cache, donc rien a refleter cote page. Le bouton fantome
+             d'annulation (`hx-post /api/auth/cancel`) reste hors `ui::submit`. #}
+          <form class="form" method="post" action="/api/auth/verify-2fa" hx-post="/api/auth/verify-2fa" hx-swap="none">
+            {{ ui::field(code_label, "text", "code", "", "one-time-code", "", "[0-9]{6}", "numeric", "6", false, true) }}
+            <div class="actions">
+              <button class="btn" type="submit">{{ t_verify }}</button>
+              <button class="btn btn--ghost" type="button" hx-post="/api/auth/cancel" hx-swap="none">{{ t_cancel }}</button>
+            </div>
+          </form>
+
+          {{ ui::note(t_note) }}
+        </section>
+      </div>
+    </div>
+  </div>
+{% endblock %}

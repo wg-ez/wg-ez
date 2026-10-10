@@ -1,0 +1,22 @@
+{% extends "layout.html" %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  <div class="page">
+    <div class="pad">
+      <div class="narrow--wide">
+        {{ ui::wizard(s1, s2, s3, 1) }}
+
+        <div class="stack">
+          <section class="panel">
+            {{ ui::phead_h1(title, s1) }}
+            <p class="lead">{{ body }}</p>
+            <div class="actions">
+              <a class="btn" href="/setup/2">{{ next }}</a>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endblock %}

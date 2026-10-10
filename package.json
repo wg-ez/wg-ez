@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "description": "wg-ez — seule dep npm: @tailwindcss/cli.",
+  "scripts": {
+    "css": "tailwindcss -i ./static/css/input.css -o ./static/css/app.css --minify"
+  },
+  "dependencies": {
+    "@tailwindcss/cli": "latest"
+  }
+}

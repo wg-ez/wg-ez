@@ -1,0 +1,12 @@
+-- 004_totp_last_counter.sql : anti-rejeu TOTP.
+--
+-- Memoise le dernier pas de temps (`floor(unix/30)`) dont le code a ete
+-- consomme avec succes. Un code deja consomme est ensuite refuse meme si la
+-- fenetre d'acceptation `±1` le couvre encore : la comparaison exige un
+-- compteur strictement plus grand que `totpLastCounter`.
+--
+-- Additive : `NULL` = aucun code encore consomme (aucune base existante n'est
+-- invalidee). La consommation elle-meme est un UPDATE conditionnel atomique
+-- (voir `store::user::set_totp_last_counter`), ce qui couvre la course entre
+-- deux sessions qui presenteraient le meme code simultanement.
+ALTER TABLE users ADD COLUMN totpLastCounter INTEGER;

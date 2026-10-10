@@ -1,0 +1,357 @@
+{# Macros askama partagees par tous les templates.
+   Import : {% import "partials/ui.html" as ui %} puis {{ ui::pill("x", "", false) }}.
+
+   Regle : une macro ne rend que de la BALISE et des CLASSES deja definies
+   dans static/css/input.css. Aucun style inline, aucune classe utilitaire
+   Tailwind, aucun `on*=`, aucun `<script>`/`<style>`. Tout libelle affiche
+   est un PARAMETRE (contexte Rust, traduit via `base.tr.*` / `t_*`). Seuls
+   litteraux autorises : contrats d'architecture (routes, `hx-*`, `id` de
+   grille `lines`, `id` TOTP `totp-start`/`totp-slot`/`totp-box`, `action`,
+   valeurs `sort`/`tone`, indice d'etape `1..3` du wizard) et la geometrie SVG.
+
+   - `pill(text, tone, dot)` / `pill2(a, b, tone, dot)` : pastille d'ETAT
+     (`.pill`). `tone` = "" (neutre) | "live" (`--ok`) | "warn" (`--warn`)
+     | "bad" (`--danger`). `dot` ajoute `<i class="dot">` pour les bandeaux
+     qui l'exigent. `pill2` joint deux affichages par une espace (`0 Clients`),
+     les gabarits ne sachant pas concatener.
+   - `toolbar(...)` : barre de recherche + tri de `/` (`form.toolbar` +
+     `details.menu--sort`). Les options passent par `sort_item` (lien `?sort=`,
+     `is-on` + `aria-current` sur l'active, `filter`/`lang` conserves).
+     `lang_vals` emet la meme valeur `hx-vals` que `#grid`.
+   - `client_card(c, ...)` : une `article.card` (initiales, nom cliquable, IP,
+     etats via `pill()`, `dl.kv.kv--flush`, compteurs `.io`, `.acts`). La carte
+     reste entierement cliquable (`card__name::after`, `.acts` en `z-index:2`).
+   - `phead(title, aside)` : tete de panneau (`h2` + chapeau `.hud`).
+     Definition UNIQUE : `adm::head` y delegue. `phead_h1` est la variante
+     TITRE DE PAGE (`h1.display--h3`), consommee par setup et login/2FA. Ne pas
+     fusionner : `h2` de bloc DANS la page vs `h1` UNIQUE de la page.
+   - `field(...)` : ligne de champ (`label.flabel > span.hud + input.field`).
+     Chaine vide = attribut omis ; `readonly`/`required` booleens.
+     `placeholder`/`min`/`max` sont des arguments a valeur par defaut. Ne couvre
+     PAS `textarea` : les hooks admin gardent leur champ inline (`adm::field`).
+     Les nombres sont passes en `String`, aucun attribut calcule cote gabarit.
+   - `hidden(name, value)` : `<input type="hidden">` sans classe ; `value`
+     accepte un `bool` (`Display` rend `true`/`false`). N'absorbe PAS le `#sort`
+     de `toolbar` (porte un `id` exige par `hx-include`).
+   - `submit(label, danger)` : rangee `.actions` + `.btn` de soumission
+     (`danger` = `btn--danger`). Pages/panneaux uniquement, `.acts` reste le
+     systeme des cartes. `login_2fa` garde son `.actions` inline (2e action =
+     bouton fantome `hx-post /api/auth/cancel`).
+   - `note(text)` : footnote de panneau (`p.note`). Prend du TEXTE, pas du
+     balisage : une note a lien conditionnel reste inline. A ne pas confondre
+     avec `lead` (chapeau d'intro avant les champs).
+   - `wizard(s1, s2, s3, current)` / `wizard_item(idx, label, current)` : rail
+     de progression du setup (`ol.wizard`). `idx == current` -> `is-on` +
+     `aria-current="step"`, `idx < current` -> `is-done`. `current` est un
+     indice positionnel, non traduisible.
+   - `totp_box(...)` : bloc `div.totp#totp-box` entier (QR + secret +
+     formulaire de confirmation). Une seule definition du contrat d'`id` :
+     `#totp-start` est masque par `.panel:has(#totp-box) #totp-start` des que
+     le bloc est injecte dans `#totp-slot`, sans JS.
+   - `fillers(classes)` : bouchons de fin de rangee (`len % 6` cote Rust).
+     Vraies cellules : le CSS n'affiche que celles du breakpoint courant et ne
+     peint pas de filet bas.
+   - `tail(split, id)` : queue de filets jusqu'au footer (vraies cellules).
+     `split` = 2 cellules de `/me` vs 3 de `/` ; `id` vide = pas d'`id`.
+   - `lang_vals(lang)` : fragment `hx-vals` lang partage par `toolbar`,
+     `#grid` et `#me-page`.
+   - `kv(items, flush)` / `kv1(k, v, flush)` / `empty(...)` : faits
+     affiche-seule (`dl.kv`, cadre sauf `flush`). `kv` exige un `Vec<Kv>` ;
+     `kv1` rend une ligne depuis deux chaines (profil `/me`). `kv` EST le
+     primitif lecture-seule (un `input[readonly]` ressemble a un champ editable
+     sans l'etre).
+   - `oops(code, message, cta_label)` : page d'erreur entiere partagee par
+     `error_404`/`error_500`. `.oops` centre ses enfants, d'ou un `.actions`
+     centre (divergence de conteneur, pas de composant).
+
+   Non-unifications volontaires :
+   - `.acts > *` (cellules d'une barre segmentee, `z-index:2` au-dessus du
+     voile `card::before`) vs `.btn` (boite bordee) : forcer `.btn` casserait
+     la barre et l'overlay de carte cliquable.
+   - `dl.kv--flush` (carte portant deja le cadre) vs `dl.kv` (panneau) :
+     distinction contextuelle, portee par `flush`.
+   - `login_2fa.html` vs `login.html` : pas de macro commune (hero/bandeau
+     cote login, formulaires divergents).
+   - bouton `btn--ghost` mutateur (`hx-post`/`hx-delete`) vs `a.btn--ghost` de
+     navigation : action vs lien, jamais interchangeables.
+   - `fillers`/`tail` restent de VRAIES cellules : un `min-height`/bordure de
+     conteneur peindrait un filet sur fond etire.
+#}
+
+{# Liste de faits cle/valeur : `.kv` (cadre) ou `.kv--flush` (dans une carte
+   portant deja le cadre). `items` : Vec<Kv>. #}
+{% macro kv(items, flush) -%}
+<dl class="kv{% if flush %} kv--flush{% endif %}">
+  {% for row in items %}
+  <div>
+    <dt>{{ row.k }}</dt>
+    <dd>{{ row.v }}</dd>
+  </div>
+  {% endfor %}
+</dl>
+{%- endmacro %}
+
+{# Etat vide centre : titre display, chapeau mute, CTA optionnel.
+   `name` est le libelle du champ « nom » injecte par `app.js` dans la modale
+   (`data-n`) : sans lui, le `<span class="hud">` affiche « undefined ». #}
+{% macro empty(title, body, cta, name) -%}
+<div class="empty">
+  <h2>{{ title }}</h2>
+  <p class="muted">{{ body }}</p>
+  {% if !cta.is_empty() %}<button class="btn" type="button" data-do="new" data-n="{{ name }}">{{ cta }}</button>{% endif %}
+</div>
+{%- endmacro %}
+
+{# Pastille d'etat simple (`.pill`). `tone` = "" | "live" | "warn" | "bad" ;
+   `dot` ajoute `<i class="dot">` pour les bandeaux qui l'exigent. #}
+{% macro pill(text, tone, dot) -%}
+<span class="pill{% if tone == "live" %} pill--live{% else if tone == "warn" %} pill--warn{% else if tone == "bad" %} pill--bad{% endif %}">{% if dot %}<i class="dot{% if tone == "live" %} dot--live{% endif %}"></i>{% endif %}{{ text }}</span>
+{%- endmacro %}
+
+{# Pastille d'etat composite : deux affichages joints par une espace
+   (`0 Clients`, `version 1.2.3`). Meme `tone`/`dot` que `pill`. #}
+{% macro pill2(a, b, tone, dot) -%}
+<span class="pill{% if tone == "live" %} pill--live{% else if tone == "warn" %} pill--warn{% else if tone == "bad" %} pill--bad{% endif %}">{% if dot %}<i class="dot{% if tone == "live" %} dot--live{% endif %}"></i>{% endif %}{{ a }} {{ b }}</span>
+{%- endmacro %}
+
+{# Fragment `hx-vals` lang partage par `toolbar`, `#grid` et `#me-page`
+   (une seule definition du JSON). #}
+{% macro lang_vals(lang) -%}
+hx-vals='{"lang": "{{ lang }}"}'
+{%- endmacro %}
+
+{# UNE option du tri (`a.menu__item`) : `cur == value` pose `is-on` +
+   `aria-current` (jamais l'un sans l'autre). Interne a `toolbar`. #}
+{% macro sort_item(cur, value, lang, filter_enc, label) -%}
+<a class="menu__item{% if cur == value %} is-on{% endif %}" href="?sort={{ value }}&amp;lang={{ lang }}{% if !filter_enc.is_empty() %}&amp;filter={{ filter_enc }}{% endif %}"{% if cur == value %} aria-current="true"{% endif %}>{{ label }}</a>
+{%- endmacro %}
+
+{# Barre de recherche + tri de `/` (`form.toolbar` + `details.menu--sort`,
+   meme composant `<details class="menu">` que la topbar). Chaque option
+   navigue : le serveur trie et rend le libelle courant. `filter`/`lang` sont
+   conserves ; le champ cache `#sort` garde le tri pour le sondage htmx de
+   `#grid`. #}
+{% macro toolbar(q, search, lang, sort, sort_label, filter_enc, asc, desc, created_asc, created_desc) -%}
+<form class="toolbar" hx-get="/" hx-target="#grid" hx-swap="innerHTML" hx-trigger="keyup changed delay:300ms from:#q" {{ lang_vals(lang) }}>
+  <input id="q" class="field grow" type="search" name="filter" value="{{ q }}" placeholder="{{ search }}" aria-label="{{ search }}" autocomplete="off" />
+  <input type="hidden" id="sort" name="sort" value="{{ sort }}" />
+  <details class="menu menu--sort">
+    <summary class="menu__btn">
+      <span>{{ sort_label }}</span>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+    </summary>
+    <div class="menu__panel">
+      {{ sort_item(sort, "name", lang, filter_enc, asc) }}
+      {{ sort_item(sort, "-name", lang, filter_enc, desc) }}
+      {{ sort_item(sort, "-created", lang, filter_enc, created_desc) }}
+      {{ sort_item(sort, "created", lang, filter_enc, created_asc) }}
+    </div>
+  </details>
+</form>
+{%- endmacro %}
+
+{# UNE carte client (`article.card`) : avatar initiales, nom cliquable vers
+   `/clients/:id`, IP, etats via `pill()`, `dl.kv.kv--flush` endpoint/
+   expiration, compteurs `.io`, puis `.acts` (activer/desactiver, QR en modale,
+   `.conf`, OTL). La carte reste entierement cliquable (`card__name::after` en
+   calque, `.acts` au-dessus en `z-index:2`). #}
+{% macro client_card(c, t_endpoint, t_expires, t_rx, t_tx, t_qrcode, t_config, t_otl, t_otl_short, t_enable, t_disable, t_disabled) -%}
+<article class="card">
+  <div class="card__top">
+    <span class="avatar avatar-initial">{{ c.initials }}</span>
+    <div class="card__id">
+      <a class="card__name" href="/clients/{{ c.id }}">{{ c.name }}</a>
+      <p class="card__ip">{{ c.ip }}</p>
+    </div>
+    {% if !c.enabled -%}
+    {{ pill(t_disabled, "bad", false) }}
+    {% else if c.connected -%}
+    {{ pill(c.seen, "live", false) }}
+    {% else -%}
+    {{ pill(c.seen, "", false) }}
+    {% endif -%}
+  </div>
+  <dl class="kv kv--flush">
+    <div>
+      <dt>{{ t_endpoint }}</dt>
+      <dd>{{ c.endpoint }}</dd>
+    </div>
+    <div>
+      <dt>{{ t_expires }}</dt>
+      <dd>{{ c.expires }}</dd>
+    </div>
+  </dl>
+  <div class="io">
+    <span><b>{{ t_rx }}</b> {{ c.rx_h }}</span>
+    <span><b>{{ t_tx }}</b> {{ c.tx_h }}</span>
+  </div>
+  {% if c.expired -%}
+  <div class="card__tags">
+    {{ pill(c.expires, "warn", false) }}
+  </div>
+  {% endif -%}
+  <div class="acts">
+    {% if c.enabled -%}
+    <button type="button" hx-post="/api/client/{{ c.id }}/disable" hx-swap="none">{{ t_disable }}</button>
+    {% else -%}
+    <button type="button" hx-post="/api/client/{{ c.id }}/enable" hx-swap="none">{{ t_enable }}</button>
+    {% endif -%}
+    <button type="button" data-do="qr" data-id="{{ c.id }}">{{ t_qrcode }}</button>
+    <a href="/api/client/{{ c.id }}/configuration">{{ t_config }}</a>
+    <button type="button" class="acts--wrap" hx-post="/api/client/{{ c.id }}/generateOneTimeLink" hx-swap="none" title="{{ t_otl }}" data-otl data-id="{{ c.id }}" data-label="{{ t_otl_short }}">{{ t_otl_short }}</button>
+  </div>
+</article>
+{%- endmacro %}
+
+{# Bouchons de fin de rangee : `classes` vient du Rust (`len % 6`), le CSS
+   n'affiche que ceux du breakpoint courant. Vraies cellules : le filet bas de
+   la derniere rangee court sur toute la largeur. #}
+{% macro fillers(classes) -%}
+{% for f in classes %}<div class="{{ f }}" aria-hidden="true"></div>{% endfor %}
+{%- endmacro %}
+
+{# Zone vide pleine hauteur jusqu'au footer : vraies cellules (memes pistes
+   que la grille du dessus), qui ne portent que le filet bas du cadre.
+   `split` = variante 2fr/1fr de `/me` (2 cellules) vs 3 cellules de `/` ;
+   `id` vide = pas d'`id` (`/me`), `"lines"` sur `/`. #}
+{% macro tail(split, id) -%}
+<div{% if !id.is_empty() %} id="{{ id }}"{% endif %} class="mesh{% if split %} mesh--split{% endif %} mesh--tail" aria-hidden="true"><span></span><span></span>{% if !split %}<span></span>{% endif %}</div>
+{%- endmacro %}
+
+{# Tete de panneau (`.panel__head`) : titre `h2` + chapeau `.hud` a droite,
+   filet bas. `aside` vide = pas de chapeau. Definition UNIQUE du squelette :
+   `adm::head` y delegue. Variante TITRE DE PAGE : `phead_h1`. Ne pas
+   fusionner : `h2` de bloc DANS la page vs `h1` UNIQUE de la page. #}
+{% macro phead(title, aside) -%}
+<div class="panel__head">
+  <h2 class="panel__t">{{ title }}</h2>
+  {% if !aside.is_empty() %}<p class="hud">{{ aside }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{# Tete de panneau NIVEAU PAGE : `h1.panel__t.display.display--h3` + chapeau
+   `.hud`. `phead` = titre de bloc DANS la page ; `phead_h1` = titre-carte
+   UNIQUE de la page (un seul `<h1>` par page). Ne pas fusionner. La chaine
+   `aside` « version X » est pre-calculee cote Rust car `~` ne peut pas
+   traverser le test `is_empty` de la macro. #}
+{% macro phead_h1(title, aside) -%}
+<div class="panel__head">
+  <h1 class="panel__t display display--h3">{{ title }}</h1>
+  {% if !aside.is_empty() %}<p class="hud">{{ aside }}</p>{% endif %}
+</div>
+{%- endmacro %}
+
+{# UN item du rail de progression du setup (`li.wizard__i`) : numero mono `NN`
+   + libelle. `idx == current` -> `is-on` + `aria-current="step"` (seule
+   cellule `--app`), `idx < current` -> `is-done` (`--ok`). Interne a
+   `wizard`. #}
+{% macro wizard_item(idx, label, current) -%}
+<li class="wizard__i{% if idx == current %} is-on{% else if idx < current %} is-done{% endif %}"{% if idx == current %} aria-current="step"{% endif %}>
+  <span class="wizard__n">0{{ idx }}</span><span class="wizard__l">{{ label }}</span>
+</li>
+{%- endmacro %}
+
+{# Rail de progression du setup ENTIER (`ol.wizard`, 3 etapes) : definition
+   unique du contrat `is-on`/`is-done`/`aria-current`. `s1..s3` = intitules
+   resolus par le Rust ; `current` = etape active 1..3, seul litteral transmis
+   (indice POSITIONNEL, non traduisible, meme statut que le `0N / 03`). #}
+{% macro wizard(s1, s2, s3, current) -%}
+<ol class="wizard">
+  {{ wizard_item(1, s1, current) }}
+  {{ wizard_item(2, s2, current) }}
+  {{ wizard_item(3, s3, current) }}
+</ol>
+{%- endmacro %}
+
+{# UN fait cle/valeur (`dl.kv`, cadre sauf `flush`) : pendant mono-ligne de
+   `kv()` pour les contextes sans `Vec<Kv>` (profil `/me`). Remplace le
+   `input[readonly]` du profil : `kv` EST le primitif lecture-seule, un champ
+   readonly ressemble a un champ editable sans l'etre. Le secret TOTP ne passe
+   PAS par ici (il vit dans `totp_box`). #}
+{% macro kv1(k, v, flush) -%}
+<dl class="kv{% if flush %} kv--flush{% endif %}">
+  <div>
+    <dt>{{ k }}</dt>
+    <dd>{{ v }}</dd>
+  </div>
+</dl>
+{%- endmacro %}
+
+{# Ligne de champ (`label.flabel > span.hud + input.field`). Chaine vide =
+   attribut omis ; `readonly`/`required` booleens (jamais les deux ensemble).
+   Les attributs figes (`type`, `name`, `pattern`, `action`) sont le contrat
+   avec l'API, comme `name`/`type`/`min`/`max` de `adm::field`. #}
+{% macro field(label, itype, name, value, autocomplete, minlength, pattern, inputmode, maxlength, readonly, required, placeholder = "", min = "", max = "", disabled = false) -%}
+<label class="flabel">
+  <span class="hud">{{ label }}</span>
+  <input class="field" type="{{ itype }}"{% if !name.is_empty() %} name="{{ name }}"{% endif %}{% if !value.is_empty() %} value="{{ value }}"{% endif %}{% if !autocomplete.is_empty() %} autocomplete="{{ autocomplete }}"{% endif %}{% if !minlength.is_empty() %} minlength="{{ minlength }}"{% endif %}{% if !pattern.is_empty() %} pattern="{{ pattern }}"{% endif %}{% if !inputmode.is_empty() %} inputmode="{{ inputmode }}"{% endif %}{% if !maxlength.is_empty() %} maxlength="{{ maxlength }}"{% endif %}{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if !min.is_empty() %} min="{{ min }}"{% endif %}{% if !max.is_empty() %} max="{{ max }}"{% endif %}{% if readonly %} readonly{% endif %}{% if required %} required{% endif %}{% if disabled %} disabled{% endif %} />
+</label>
+{%- endmacro %}
+
+{# Rangee `.actions` + bouton `.btn` de soumission (`danger` pose
+   `btn--danger`). Pages et panneaux uniquement : `.acts` reste le systeme des
+   cartes. #}
+{% macro submit(label, danger) -%}
+<div class="actions">
+  <button class="btn{% if danger %} btn--danger{% endif %}" type="submit">{{ label }}</button>
+</div>
+{%- endmacro %}
+
+{# Champ cache (`<input type="hidden">`, aucune classe). `name` et `value`
+   sont des PARAMETRES : `value` accepte un `bool` (`Display` rend
+   `true`/`false`, cas de `enabled`) comme une chaine. `action=…` reste un
+   litteral au SITE D'APPEL (contrat avec l'API). N'absorbe PAS le `#sort` de
+   `toolbar` : ce champ porte un `id` exige par `hx-include="#sort"`. #}
+{% macro hidden(name, value) -%}
+<input type="hidden" name="{{ name }}" value="{{ value }}" />
+{%- endmacro %}
+
+{# Footnote de panneau (`p.note`, mono 11 px uppercase `.faint`).
+   DANS `.panel`, jamais hors cadre : `banner`/`banner--warn` (shell, hors
+   `.frame`) ont d'autres roles. #}
+{% macro note(text) -%}
+<p class="note">{{ text }}</p>
+{%- endmacro %}
+
+{# Bloc de configuration TOTP (`div.totp#totp-box`) entier : QR (fond blanc
+   `.qr`), secret en `dl.kv.kv--flush` a `dd.secret` (colonne + retour a la
+   ligne : `.totp .kv` / `.totp .secret`), formulaire de confirmation
+   (`action=confirm`). Une seule definition du contrat d'`id` : `#totp-start`
+   est masque par `.panel:has(#totp-box) #totp-start` des que le bloc est
+   injecte dans `#totp-slot`, sans JS. Route `/api/me/totp` figee : macro
+   specifique `/me`. #}
+{% macro totp_box(secret, qr_svg, t_secret_k, t_code, t_verify) -%}
+<div class="totp" id="totp-box">
+  <div class="qr">{{ qr_svg|safe }}</div>
+  <dl class="kv kv--flush">
+    <div>
+      <dt>{{ t_secret_k }}</dt>
+      <dd class="secret">{{ secret }}</dd>
+    </div>
+  </dl>
+  <form class="form" hx-post="/api/me/totp" hx-swap="none">
+    {{ hidden("action", "confirm") }}
+    {{ field(t_code, "text", "code", "", "one-time-code", "", "[0-9]{6}", "numeric", "6", false, true) }}
+    {{ submit(t_verify, false) }}
+  </form>
+</div>
+{%- endmacro %}
+
+{# Page d'erreur entiere : `div.page > div.oops` = tuile `span.oops__code`,
+   titre `h1.display.display--h3`, retour `.actions > a.btn` vers `/`.
+   Definition UNIQUE de `error_404.html` et `error_500.html`, qui restent
+   distincts cote Rust (`#[template(path = ...)]`). `code` et `cta_label`
+   sont des PARAMETRES. `.oops` centre ses enfants, d'ou un `.actions` centre
+   alors qu'il est aligne a gauche dans les formulaires (divergence de
+   conteneur, pas de composant). #}
+{% macro oops(code, message, cta_label) -%}
+<div class="page">
+  <div class="oops">
+    <span class="oops__code">{{ code }}</span>
+    <h1 class="display display--h3">{{ message }}</h1>
+    <div class="actions">
+      <a class="btn" href="/">{{ cta_label }}</a>
+    </div>
+  </div>
+</div>
+{%- endmacro %}

@@ -1,0 +1,129 @@
+{# Chrome partagee du shell (`layout.html`, hero du login).
+   Import : {% import "partials/chrome.html" as chrome %}.
+
+   Fichier distinct de `partials/ui.html` : `ui.html` porte les primitives de
+   CORPS de page (importees par les pages et les partiels htmx) ; ce fichier
+   porte le SHELL (marque, nav, bannieres, eyebrow), importe par `layout.html`
+   et par `login.html` (`brand_shield`/`banner_warn`).
+
+   Regle (idem `ui.html`) : une macro ne rend que de la BALISE et des CLASSES
+   deja definies dans `static/css/input.css`. Aucun style inline, aucune classe
+   utilitaire Tailwind, aucun `on*=`, aucun `<script>`/`<style>`. Tout libelle
+   est un PARAMETRE (contexte Rust). Seuls litteraux autorises : mots de marque
+   identiques EN/FR (`wg-ez`, `GitHub`), routes d'architecture (`/`, `/admin`,
+   `/me`, `/login`, `/api/session`) et geometrie SVG. #}
+
+{# Bouclier wg-ez SEUL (sans wrapper) : le wrapper porte la mise en page et
+   reste au gabarit appelant (`a.brand` du shell, `span.hero__logo` du login).
+   La geometrie canonique est celle du layout. #}
+{% macro brand_shield() -%}
+<svg viewBox="0 0 24 24" aria-hidden="true">
+  <path d="M12 2.5 4.5 5.6v6.1c0 4.6 3.1 8.6 7.5 9.8 4.4-1.2 7.5-5.2 7.5-9.8V5.6L12 2.5Z" />
+  <path d="M8.5 12.2h7M8.5 9.2h7M10.5 15.2h3" />
+</svg>
+{%- endmacro %}
+
+{# Lien de marque complet du shell (nav + footer). `href="/"` est la racine du
+   site ; `wg-ez` est un mot de marque non traduisible. #}
+{% macro brand_link() -%}
+<a class="brand" href="/">{{ brand_shield() }}wg-ez</a>
+{%- endmacro %}
+
+{# UN lien de nav desktop (`div.nav__links`). `active` pose `is-on`. Via
+   `nav_links()`. #}
+{% macro nav_link(href, label, active) -%}
+<a class="nav__link{% if active %} is-on{% endif %}" href="{{ href }}"><span>{{ label }}</span></a>
+{%- endmacro %}
+
+{# UN lien de nav mobile (`div.menu__nav`). `active` pose `is-on` +
+   `aria-current="page"` (meme condition). Via `menu_nav()`. #}
+{% macro menu_link(href, label, active) -%}
+<a class="menu__item{% if active %} is-on{% endif %}" href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}</a>
+{%- endmacro %}
+
+{# Nav desktop : les 3 liens (Clients / Admin si `is_admin` / Mon compte).
+   La garde `username != ""` reste au gabarit. `nav_on` est le discriminant
+   pose par `Base::nav`. #}
+{% macro nav_links(nav_on, is_admin, t_clients, t_admin, t_me) -%}
+<div class="nav__links">
+  {{ nav_link("/", t_clients, nav_on == "clients") }}
+  {% if is_admin %}{{ nav_link("/admin", t_admin, nav_on == "admin") }}{% endif %}
+  {{ nav_link("/me", t_me, nav_on == "me") }}
+</div>
+{%- endmacro %}
+
+{# Nav mobile : memes 3 liens, classes `.menu__*` (masque en desktop ou la nav
+   horizontale suffit). #}
+{% macro menu_nav(nav_on, is_admin, t_clients, t_admin, t_me) -%}
+<div class="menu__nav">
+  {{ menu_link("/", t_clients, nav_on == "clients") }}
+  {% if is_admin %}{{ menu_link("/admin", t_admin, nav_on == "admin") }}{% endif %}
+  {{ menu_link("/me", t_me, nav_on == "me") }}
+</div>
+{%- endmacro %}
+
+{# Bouton de deconnexion, variante desktop ou mobile (meme action). Chaque
+   breakpoint montre exactement une variante. `hx-delete="/api/session"` +
+   `hx-swap="none"` = contrat de deconnexion (navigation via `HX-Redirect`),
+   identiques aux deux sites. #}
+{% macro logout_btn(label, mobile) -%}
+{% if mobile -%}
+<button class="menu__item menu__item--out" type="button" hx-delete="/api/session" hx-swap="none">{{ label }}</button>
+{%- else -%}
+<button class="nav__out" type="button" hx-delete="/api/session" hx-swap="none">{{ label }}</button>
+{%- endif %}
+{%- endmacro %}
+
+{# CTA « Connexion » (visiteur deconnecte).
+
+   NOTE BOUTONS (les 4 variantes `nav__cta` / `nav__out` / `icon-btn` /
+   `menu__item--out`) : elles NE sont PAS converties en `.btn` + modifieurs.
+   `.btn` est une boite de 3rem bordee pour corps de page et modales ;
+   `nav__cta` est une cellule pleine hauteur de la barre 48px. Forcer `.btn`
+   casserait l'alignement de la topbar et l'ordre mobile. `.btn` reste reserve
+   aux pages. #}
+{% macro login_cta(label) -%}
+<a class="nav__cta" href="/login">{{ label }}</a>
+{%- endmacro %}
+
+{# CTA « Nouveau client » (admins, ouvre la modale via `app.js`). `name` est
+   le libelle du champ « nom » injecte par `app.js` (`data-n`). Meme NOTE
+   BOUTONS que `login_cta`. #}
+{% macro new_cta(label, name) -%}
+<button class="nav__cta" type="button" data-do="new" data-n="{{ name }}">{{ label }}</button>
+{%- endmacro %}
+
+{# Bandeau d'info pleine largeur (etat HTTP clair).
+
+   `banner` / `banner--warn` vs `panel--danger` : NE PAS FUSIONNER. Les
+   `banner*` vivent HORS `.frame` (bandeaux globaux du shell) ; `panel--danger`
+   est un PANNEAU de formulaire DANS `.page`. Changer l'un en l'autre
+   deplacerait le message hors/dans le cadre et briserait la grille de filets. #}
+{% macro banner(text) -%}
+<div class="banner">
+  <p class="banner__text">{{ text }}</p>
+</div>
+{%- endmacro %}
+
+{# Bandeau d'alerte pleine largeur (mot de passe desactive). Meme NOTE
+   `banner` vs `panel--danger` : hors cadre ici, jamais un panneau de
+   formulaire. #}
+{% macro banner_warn(text) -%}
+<div class="banner banner--warn">
+  <p class="banner__text">{{ text }}</p>
+</div>
+{%- endmacro %}
+
+{# Sourcil sticky de section (chrome `layout.html`) : rendu UNE fois ici,
+   jamais dans les pages. `num` vide = pas de numero (login, setup, erreurs) ;
+   `aside` vide = pas de chapeau (masque <40rem). Les pages ne fournissent que
+   des DONNEES via `Base::eyebrow(num, aside)` : toute structure `.eyebrow*`
+   ecrite dans une page est un bug. #}
+{% macro eyebrow(num, title, aside) -%}
+<div class="eyebrow">
+  <div class="eyebrow__in">
+    <p class="hud eyebrow__title">{% if !num.is_empty() %}<span class="eyebrow__num">{{ num }}</span><span class="eyebrow__slash">/</span>{% endif %}{{ title }}</p>
+    {% if !aside.is_empty() %}<p class="hud eyebrow__aside">{{ aside }}</p>{% endif %}
+  </div>
+</div>
+{%- endmacro %}

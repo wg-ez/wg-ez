@@ -1,0 +1,66 @@
+{% extends "layout.html" %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  <div class="page">
+    {#
+      Bandeau d'identite de la section : meme grammaire que `/me` et le detail
+      client (`.pad` > titre `.display` + `.row` de `.pill`). Il vit HORS de
+      `#grid` : le sondage htmx ne remplace que les cartes, le bandeau n'est
+      donc jamais re-rendu par un tick.
+
+      Le `.toolbar` porte son `border-top` (le bandeau remplace le filet bas du
+      `.eyebrow`) et `#grid` reste en `.mesh--flush` : pas de double filet.
+    #}
+    <div class="pad">
+      <h1 class="display display--h3">{{ base.title }}</h1>
+      <div class="row">
+        {{ ui::pill(base.iface, "", false) }}
+        {% if base.iface_up %}
+          {{ ui::pill(base.tr.h_up, "live", false) }}
+        {% else %}
+          {{ ui::pill(base.tr.h_down, "", false) }}
+        {% endif %}
+        {{ ui::pill2(client_count, base.tr.nav_clients, "", false) }}
+        {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
+      </div>
+    </div>
+
+    {# Barre de recherche + tri via `ui::toolbar`. `#sort` garde le tri pour le
+       sondage htmx de `#grid`. #}
+    {{ ui::toolbar(q, t_search, base.lang, sort, sort_label, q_enc, t_asc, t_desc, t_created_asc, t_created_desc) }}
+
+    {#
+      Le partial ne renvoie que les cartes : swap `innerHTML`. En `outerHTML`
+      htmx remplacait ce div (donc `.mesh` et son `id`) par les cartes nues :
+      la carte passait en pleine largeur (saut de layout) et le sondage
+      s'arretait (plus de `#grid`). Les actions activer/desactiver renvoient un
+      trigger `refreshGrid` : la grille se re-render des la reponse.
+
+      Le rafraichissement live est pousse par le long-poll de la topbar
+      (`partials/peers.html`, `/api/status/stream`) : `refreshGridLive` est emis
+      des qu'un statut change, jamais par tick. `every 30s` n'est qu'un filet si
+      le long-poll meurt ; `app.js` ne gele les deux que pendant un clic actif
+      (le swap detruirait le bouton sous le curseur), tandis que `refreshGrid`
+      (mutation) passe toujours.
+    #}
+    <div
+      id="grid"
+      class="mesh mesh--flush"
+      hx-get="/"
+      hx-trigger="every 30s, refreshGrid from:body, refreshGridLive from:body"
+      hx-target="#grid"
+      hx-swap="innerHTML"
+      hx-include="#q, #sort"
+      {{ ui::lang_vals(base.lang) }}
+    >
+      {% include "partials/grid.html" %}
+    </div>
+    {#
+      Zone vide pleine hauteur jusqu'au footer via `ui::tail` (vraies cellules
+      `.mesh--tail`, memes pistes que `#grid`). Elle ne porte que le filet bas
+      du cadre : le sondage htmx ne la touche jamais.
+    #}
+    {{ ui::tail(false, "lines") }}
+  </div>
+{% endblock %}

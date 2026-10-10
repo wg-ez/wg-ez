@@ -1,0 +1,132 @@
+# Dev standalone — PAS de `-f docker-compose.yml` supplementaire.
+# Usage (Docker + Compose uniquement) :
+#   docker compose -f docker-compose.dev.yml up --build          # fmt+clippy+test+htmx puis build+run
+#   docker compose -f docker-compose.dev.yml up --build --watch  # + boucle dev (sync static/, rebuild src|templates|locales)
+#   TEST_FILTER=<sous-chaine> docker compose -f docker-compose.dev.yml up --build test  # un seul test
+#   docker compose -f docker-compose.dev.yml --profile audit up --build audit           # 270 checks HTTP (serveur dev lance)
+#   docker compose -f docker-compose.dev.yml down
+#
+# `wg-ez` demarre uniquement si fmt/clippy/test/htmx reussissent
+# (`depends_on: service_completed_successfully`). Les portes tournent dans les
+# stages glibc du Dockerfile (checks au BUILD) ; le runtime reste l'image musl.
+services:
+  fmt:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: fmt
+    image: wg-ez-fmt
+    command: ["true"]
+    restart: "no"
+
+  clippy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: clippy
+    image: wg-ez-clippy
+    command: ["true"]
+    restart: "no"
+
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+      args:
+        TEST_FILTER: ${TEST_FILTER:-}
+    image: wg-ez-test
+    command: ["true"]
+    restart: "no"
+
+  # Verifie que static/vendor/htmx.min.js == pinner upstream (version + SHA-256).
+  # Garder en phase avec le bloc `curl ... htmx.org@<version>` ci-dessous.
+  htmx:
+    image: curlimages/curl:latest
+    volumes:
+      - ./static/vendor:/o:ro
+    command:
+      - sh
+      - -c
+      - >-
+        set -eu;
+        curl -sSfL -o /tmp/htmx.min.js "https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js";
+        echo "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717  /tmp/htmx.min.js" | sha256sum -c -;
+        echo "d6fdc75f204e6bdefa99b69bf1e6d4ac69b8a364f77929f45c13476b4000f717  /o/htmx.min.js" | sha256sum -c -
+    restart: "no"
+
+  wg-ez:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: wg-ez:dev
+    container_name: wg-ez-dev
+    ports:
+      - 51821:51821
+      - 51820:51820/udp
+    volumes:
+      - ./wg-data:/etc/wireguard
+      - /lib/modules:/lib/modules:ro
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      net.ipv4.ip_forward: 1
+      net.ipv6.conf.all.forwarding: 1
+    restart: unless-stopped
+    depends_on:
+      fmt:
+        condition: service_completed_successfully
+      clippy:
+        condition: service_completed_successfully
+      test:
+        condition: service_completed_successfully
+      htmx:
+        condition: service_completed_successfully
+    develop:
+      watch:
+        - action: rebuild
+          path: ./static/css/input.css
+        - action: sync
+          path: ./static/js
+          target: /static/js
+        - action: sync
+          path: ./static/vendor
+          target: /static/vendor
+        - action: sync
+          path: ./static/img
+          target: /static/img
+        - action: rebuild
+          path: ./src
+        - action: rebuild
+          path: ./templates
+        - action: rebuild
+          path: ./locales
+        - action: rebuild
+          path: ./Cargo.toml
+        - action: rebuild
+          path: ./Cargo.lock
+        - action: rebuild
+          path: ./build.rs
+
+  # 270 checks HTTP contre le serveur dev (`--profile audit`, reseau hote).
+  audit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: audit
+    image: wg-ez-audit
+    profiles: ["audit"]
+    network_mode: host
+    environment:
+      BASE_URL: ${BASE_URL:-http://127.0.0.1:51821}
+      AUDIT_USER: ${AUDIT_USER:-}
+      AUDIT_PASS: ${AUDIT_PASS:-}
+    depends_on:
+      wg-ez:
+        condition: service_started
+    restart: "no"
+
+networks:
+  default:
+    enable_ipv6: true

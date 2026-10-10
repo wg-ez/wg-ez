@@ -1,0 +1,90 @@
+{# Macros de la page d'administration.
+   Import : {% import "admin/macros.html" as adm %} puis {{ adm::panel(b) }}
+   (`admin/index.html`, seule consommatrice).
+
+   La page admin est une LISTE de blocs decrits par des donnees (`Vec<Block>`) :
+   le squelette `panel__head` + `<form class="form">` + `.actions` et la ligne
+   de champ sont emis UNE fois ici, `admin/index.html` n'a plus qu'a boucler.
+
+   Regle : une macro ne rend que de la BALISE et des CLASSES deja definies
+   dans `static/css/input.css`. Aucun style inline, aucune classe utilitaire
+   Tailwind, aucun texte calcule ici (tout vient du contexte Rust, y compris
+   les libelles).
+
+   - `head` DELEGUE a `ui::phead` (meme `.panel__head`) : `adm::head` n'est
+     qu'un alias pilote par `Vec<Block>`.
+   - `field` prend un `Field` Rust (`kind` Text/Number/Area + `min`/`max` +
+     `rows=2` fige) ; `ui::field` prend des scalaires texte/password et ne
+     connait ni `textarea` ni `min`/`max`. Ne pas unifier sans toucher
+     `Vec<Block>` ou la signature de `ui::field`.
+   - `check` (`label.switch`, case `value="true"`) n'a pas de pendant dans
+     `ui.html` (seule l'admin a des interrupteurs) : pas d'`ui::switch` tant
+     qu'il n'y a pas de second consommateur.
+   - `button` porte les DEUX branches (`submit` dans `.actions` vs bouton
+     libre `hx-post` + `hx-confirm` hors formulaire pour Restart) ET la
+     variante `btn--wrap` du CIDR, que `ui::submit` ne sait pas exprimer.
+   - `panel` assemble `head` + grille `.form`/`.form-2` (`cols > 1`) + checks
+     + `button` + `note` depuis un `Block` : deplacer cet assemblage en
+     `ui.html` y importerait le type `Block` (dependance croisee).
+#}
+{% import "partials/ui.html" as ui %}
+
+{# Tete de panneau : alias pilote par `Vec<Block>` de `ui::phead` (une seule
+   definition du `.panel__head`). Le titre du bloc vit dans le `Block`. #}
+{% macro head(title, aside) -%}
+{{ ui::phead(title, aside) }}
+{%- endmacro %}
+
+{# Ligne de champ : `label.flabel > span.hud + input|textarea`. Les attributs
+   litteraux (`name`, `type`, `min`/`max`, `rows`) sont le contrat avec l'API. #}
+{% macro field(f) -%}
+<label class="flabel">
+  <span class="hud">{{ f.label }}</span>
+  {% if f.is_area() -%}
+  <textarea class="field field--area" name="{{ f.name }}" rows="2"{% if f.disabled %} disabled{% endif %}>{{ f.value }}</textarea>
+  {%- else if f.is_number() -%}
+  <input class="field" type="number" name="{{ f.name }}" value="{{ f.value }}"{% if !f.min.is_empty() %} min="{{ f.min }}"{% endif %}{% if !f.max.is_empty() %} max="{{ f.max }}"{% endif %}{% if f.disabled %} disabled{% endif %} />
+  {%- else if f.is_password() -%}
+  {# Jamais de `value` : le hash n'est jamais ecrit dans le HTML. Vide =
+     « inchangé » cote API. #}
+  <input class="field" type="password" name="{{ f.name }}" value="" autocomplete="new-password"{% if !f.placeholder.is_empty() %} placeholder="{{ f.placeholder }}"{% endif %}{% if f.disabled %} disabled{% endif %} />
+  {%- else -%}
+  <input class="field" type="text" name="{{ f.name }}" value="{{ f.value }}"{% if f.disabled %} disabled{% endif %} />
+  {%- endif %}
+</label>
+{%- endmacro %}
+
+{# Interrupteur a etat : hors de la grille de champs (`.form-2`). La case
+   native reste le controle de formulaire (POST « true » si cochee) mais elle
+   est masquee et doublee par `.switch__track` qui passe en `--ok` quand elle
+   est cochee. Le pouce est dessine sur le `<span>` frere (un pseudo-element
+   sur `<input>` n'est pas rendu). #}
+{% macro check(c) -%}
+<label class="switch">
+  <input type="checkbox" name="{{ c.name }}" value="true"{% if c.on %} checked{% endif %} />
+  <span class="switch__track" aria-hidden="true"></span>
+  <span class="switch__label">{{ c.label }}</span>
+</label>
+{%- endmacro %}
+
+{# Bouton de bas de bloc : `submit` du formulaire, ou bouton libre `hx-post` +
+   `hx-confirm` (bloc Restart, qui ne soumet rien). #}
+{% macro button(b) -%}
+{% if b.action.submit %}<button class="{{ b.action.cls }}" type="submit">{{ b.action.label }}</button>{% else %}<button class="{{ b.action.cls }}" type="button" hx-post="{{ b.post }}" hx-swap="none" hx-confirm="{{ b.action.confirm }}">{{ b.action.label }}</button>{% endif %}
+{%- endmacro %}
+
+{# Le panneau lui-meme. `cols == 2` pose la grille `.form-2` ; `action.submit
+   == false` supprime le `<form>` (le bouton porte alors son propre `hx-post`). #}
+{% macro panel(b) -%}
+<section class="panel{% if b.danger %} panel--danger{% endif %}">
+  {{ head(b.title, b.aside) }}
+  {% if b.action.submit %}<form class="form" hx-post="{{ b.post }}" hx-swap="none">{% endif %}
+  {% if !b.fields.is_empty() %}<div class="form{% if b.cols > 1 %}-2{% endif %}">
+    {% for f in b.fields %}{{ field(f) }}{% endfor %}
+  </div>{% endif %}
+  {% for c in b.checks %}{{ check(c) }}{% endfor %}
+  <div class="actions">{{ button(b) }}</div>
+  {% if !b.note.is_empty() %}{{ ui::note(b.note) }}{% endif %}
+  {% if b.action.submit %}</form>{% endif %}
+</section>
+{%- endmacro %}

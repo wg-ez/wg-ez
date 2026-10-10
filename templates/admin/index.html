@@ -1,0 +1,37 @@
+{% extends "layout.html" %}
+{% import "admin/macros.html" as adm %}
+{% import "partials/ui.html" as ui %}
+
+{% block content %}
+  <div class="page">
+    {#
+      Page unique d'administration : plus d'onglets, six blocs empiles.
+
+      Grille de filets comme l'accueil : un seul `.stack` dans `.page`, dont
+      chaque enfant porte son propre `border-bottom` (sauf le dernier : le
+      filet bas de `.page` cloture). Le `<h1>` vit dans un `.pad`, meme bandeau
+      d'identite que `/me` (titre `.display` + `.row` de `.pill` via
+      `ui::pill`/`ui::pill2`).
+
+      Chaque bloc garde son propre `<form>` (endpoints distincts). Le rendu est
+      100 % donne (`blocks`) ; la macro `panel` de `admin/macros.html` porte
+      tout le squelette. Le seul bandeau de la page est l'`.eyebrow` sticky du
+      `layout.html`. Les URL historiques (`/admin/general`, `/admin/config`,
+      `/admin/interface`, `/admin/hooks`) rendent cette meme page.
+    #}
+    <div class="stack">
+      <div class="pad">
+        <h1 class="display display--h3">{{ base.title }}</h1>
+        <div class="row">
+          {{ ui::pill(base.tr.nav_admin, "live", false) }}
+          {{ ui::pill(base.iface, "", false) }}
+          {{ ui::pill2(base.peers, base.tr.h_peers, "", false) }}
+          {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
+        </div>
+      </div>
+      {% for b in blocks %}
+        {{ adm::panel(b) }}
+      {% endfor %}
+    </div>
+  </div>
+{% endblock %}

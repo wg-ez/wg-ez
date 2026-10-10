@@ -1,0 +1,12 @@
+target/
+node_modules/
+dist/
+shots/
+wg-data/
+etc_wireguard/
+wireguard/
+*.conf
+*.log
+npm-debug.log*
+.git/
+.gitignore

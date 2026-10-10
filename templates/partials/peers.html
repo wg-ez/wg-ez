@@ -1,0 +1,20 @@
+{#
+  Composant « pairs connectes » de la topbar.
+
+  `#peer-count` est le long-poll htmx (`GET /api/status/stream`) qui, pousse
+  par le watcher serveur partage, remplace son contenu par le compte courant et
+  se re-arme via `pollAgain` (`from:body`). Sur changement d'etat il emet
+  `refreshGridLive`, que la grille de `/` ecoute : elle n'a donc plus besoin de
+  son propre sondeur.
+#}
+<span class="iface">
+  <i class="dot{% if base.iface_up %} dot--live ok{% endif %}"></i>
+  <span
+    id="peer-count"
+    class="num"
+    hx-get="/api/status/stream"
+    hx-trigger="load, pollAgain from:body"
+    hx-swap="innerHTML"
+  >{{ base.peers }}</span>
+  <span class="iface__peers">{{ base.tr.h_peers }}</span>
+</span>
