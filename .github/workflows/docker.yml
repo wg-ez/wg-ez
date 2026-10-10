@@ -39,6 +39,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: docker/Dockerfile
           target: runtime
           platforms: linux/amd64,linux/arm64
           # Declenchement manuel uniquement : publie `latest` depuis la branche

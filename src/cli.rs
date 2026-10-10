@@ -228,7 +228,7 @@ pub fn list_clients(conn: &rusqlite::Connection) -> Result<String, CliError> {
 }
 
 /// Build the terminal QR for a client via the canonical client `.conf`
-/// resolver. `IP_MODE` (detection IPv6 en `auto`) decide, comme le serveur.
+/// resolver. `IP_MODE` (detection IPv4+IPv6 en `auto`) decide, comme le serveur.
 /// The returned payload is byte-identical to the SVG QR and `/cnf/*` download.
 pub fn qr_for_client(conn: &rusqlite::Connection, id: i64) -> Result<String, CliError> {
     if id < 0 {
@@ -236,14 +236,17 @@ pub fn qr_for_client(conn: &rusqlite::Connection, id: i64) -> Result<String, Cli
     }
     let client = crate::store::client::get(conn, id)?
         .ok_or_else(|| CliError::NotFound(format!("client with ID {id} not found")))?;
-    // Meme resolution que le serveur : `IP_MODE` puis detection IPv6 en auto.
+    // Meme resolution que le serveur : `IP_MODE` puis detection en auto.
     let mut env = std::collections::HashMap::new();
     if let Ok(v) = std::env::var("IP_MODE") {
         env.insert("IP_MODE".to_string(), v);
     }
-    let (disable_v4, disable_v6) =
-        crate::config::resolve_ip_mode(&env, crate::config::detect_ipv6_available())
-            .unwrap_or((false, false));
+    let (disable_v4, disable_v6) = crate::config::resolve_ip_mode(
+        &env,
+        crate::config::detect_ipv4_available(),
+        crate::config::detect_ipv6_available(),
+    )
+    .unwrap_or((false, false));
     // Reuse the canonical server-side resolution instead of re-implementing
     // it: the QR cannot drift from the server output.
     let (_file_name, text) =

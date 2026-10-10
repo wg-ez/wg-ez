@@ -23,7 +23,7 @@
 # resolues + hashes) ; les specs de package.json restent `latest`.
 FROM node:alpine AS css
 WORKDIR /work
-COPY package.json package-lock.json ./
+COPY docker/package.json docker/package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --no-audit --no-fund
 COPY static/css/input.css ./static/css/input.css
@@ -56,11 +56,11 @@ COPY --from=css /work/static/css/app.css ./static/css/app.css
 # exactement quand les `COPY` rejouent, jamais sinon.
 RUN find src templates locales static build.rs Cargo.toml Cargo.lock askama.toml -exec touch {} +
 
-# Porte fmt (`docker build --target fmt .`) : ne compile rien, n'ecrit rien.
+# Porte fmt (`docker build -f docker/Dockerfile --target fmt .`) : ne compile rien, n'ecrit rien.
 FROM devbase AS fmt
 RUN cargo fmt --check
 
-# Porte clippy (`docker build --target clippy .`) : warnings = erreurs. CACHEBUST force le RUN a
+# Porte clippy (`docker build -f docker/Dockerfile --target clippy .`) : warnings = erreurs. CACHEBUST force le RUN a
 # rejouer a chaque invocation (sinon BuildKit servirait le layer en cache) ; le
 # cache `/cargo-target` conserve la compilation incrementale.
 FROM devbase AS clippy
@@ -69,7 +69,7 @@ RUN --mount=type=cache,target=/cargo-target,sharing=locked \
     echo "clippy cache-bust: $CACHEBUST" >/dev/null && \
     cargo clippy --all-targets --all-features --locked -- -D warnings
 
-# Porte tests (`docker build --target test .`) : tests unitaires sans privilege via MockRunner.
+# Porte tests (`docker build -f docker/Dockerfile --target test .`) : tests unitaires sans privilege via MockRunner.
 # `TEST_FILTER` restreint a un sous-ensemble (`cargo test <filtre>`), vide = tous.
 FROM devbase AS test
 ARG CACHEBUST=0
@@ -78,7 +78,7 @@ RUN --mount=type=cache,target=/cargo-target,sharing=locked \
     echo "test cache-bust: $CACHEBUST" >/dev/null && \
     cargo test --locked $TEST_FILTER
 
-# Serveur de dev glibc (stage `dev`, `docker build --target dev .`) : binaire debug cuit dans l'image, `/work`
+# Serveur de dev glibc (stage `dev`, `docker build -f docker/Dockerfile --target dev .`) : binaire debug cuit dans l'image, `/work`
 # comme CWD pour servir `static/`. `/etc/wireguard` fourni en tmpfs au run, donc
 # aucune ecriture hote. `wireguard-tools` fournit `wg genkey` (sinon `serve`
 # refuse de fabriquer une paire de cles) ; le boot kernel echoue proprement
@@ -131,7 +131,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     --mount=type=cache,target=/usr/local/cargo/git,sharing=locked \
     cargo fetch
 # Vrai code : seul ce layer est invalide par une modif src/templates/locales/static.
-# Lint et tests via les stages glibc (`docker build --target fmt|clippy|test .`), pas ici.
+# Lint et tests via les stages glibc (`docker build -f docker/Dockerfile --target fmt|clippy|test .`), pas ici.
 COPY src/ ./src/
 COPY templates/ ./templates/
 COPY locales/ ./locales/
@@ -150,7 +150,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     cp "target/$(cat /tmp/musl_triple)/release/wg-ez" /out/wg-ez && \
     ls -la /out/wg-ez && \
     /out/wg-ez bogus-command 2>&1 | grep -q "unknown command"
-# Portes qualite (stages glibc `fmt`/`clippy`/`test`, `docker build --target <stage> .`)
+# Portes qualite (stages glibc `fmt`/`clippy`/`test`, `docker build -f docker/Dockerfile --target <stage> .`)
 # plus haut, jamais dans cette etape musl.
 
 # ------------------------------------------------------------ runtime ----

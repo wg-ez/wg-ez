@@ -16,13 +16,13 @@
 </p>
 
 <p align="center">
-  <img src="screenshot.png" width="100%" alt="wg-ez clients page" />
+  <img src="docs/screenshot.png" width="100%" alt="wg-ez clients page" />
 </p>
 
 ## Quick start
 
 ```yaml
-# docker-compose.yml
+# docker/compose.yml
 services:
   wg-ez:
     image: ghcr.io/wg-ez/wg-ez:latest

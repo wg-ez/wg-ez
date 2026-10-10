@@ -6,7 +6,7 @@ services:
       - 51821:51821 # Web UI
       - 51820:51820/udp # WireGuard traffic
     volumes:
-      - ./wg-data:/etc/wireguard
+      - ../wg-data:/etc/wireguard
       - /lib/modules:/lib/modules:ro
     cap_add:
       - NET_ADMIN

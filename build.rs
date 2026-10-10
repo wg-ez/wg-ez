@@ -1,7 +1,7 @@
 //! Build script : verifie l'artefact CSS et pre-gzippe les assets statiques.
 //!
 //! - Echec si `static/css/app.css` manque (artefact commite produit par le stage
-//!   `css` du Dockerfile, `docker build --target css .`, via `@tailwindcss/cli`,
+//!   `css` du Dockerfile (`docker/Dockerfile`), `docker build -f docker/Dockerfile --target css .`,
 //!   seule dep npm ; le binaire Rust ne touche jamais a Node).
 //! - Tout fichier de `static/` de plus de 1024 octets est gzippe vers `$OUT_DIR`.
 //! - Un manifeste est genere avec des `include_bytes!` pour servir le gzip pre-calcule.
@@ -60,7 +60,7 @@ fn main() {
 
     if !css.is_file() {
         fail(
-            "static/css/app.css is missing; generate it with `docker build --target css .` (tailwind via @tailwindcss/cli) before building",
+            "static/css/app.css is missing; generate it with `docker build -f docker/Dockerfile --target css .` (tailwind via @tailwindcss/cli) before building",
         );
     }
 

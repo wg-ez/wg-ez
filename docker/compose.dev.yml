@@ -1,19 +1,19 @@
-# Dev standalone — PAS de `-f docker-compose.yml` supplementaire.
-# Usage (Docker + Compose uniquement) :
-#   docker compose -f docker-compose.dev.yml up --build          # fmt+clippy+test+htmx puis build+run
-#   docker compose -f docker-compose.dev.yml up --build --watch  # + boucle dev (sync static/, rebuild src|templates|locales)
-#   TEST_FILTER=<sous-chaine> docker compose -f docker-compose.dev.yml up --build test  # un seul test
-#   docker compose -f docker-compose.dev.yml --profile audit up --build audit           # 270 checks HTTP (serveur dev lance)
-#   docker compose -f docker-compose.dev.yml down
+# Dev standalone — PAS de `-f docker/compose.yml` supplementaire.
+# Usage (Docker + Compose uniquement, depuis la racine du repo) :
+#   docker compose -f docker/compose.dev.yml up --build          # fmt+clippy+test+htmx puis build+run
+#   docker compose -f docker/compose.dev.yml up --build --watch  # + boucle dev (sync static/, rebuild src|templates|locales)
+#   TEST_FILTER=<sous-chaine> docker compose -f docker/compose.dev.yml up --build test  # un seul test
+#   docker compose -f docker/compose.dev.yml --profile audit up --build audit           # 270 checks HTTP (serveur dev lance)
+#   docker compose -f docker/compose.dev.yml down
 #
 # `wg-ez` demarre uniquement si fmt/clippy/test/htmx reussissent
 # (`depends_on: service_completed_successfully`). Les portes tournent dans les
-# stages glibc du Dockerfile (checks au BUILD) ; le runtime reste l'image musl.
+# stages glibc du docker/Dockerfile (checks au BUILD) ; le runtime reste l'image musl.
 services:
   fmt:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
       target: fmt
     image: wg-ez-fmt
     command: ["true"]
@@ -21,8 +21,8 @@ services:
 
   clippy:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
       target: clippy
     image: wg-ez-clippy
     command: ["true"]
@@ -30,8 +30,8 @@ services:
 
   test:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
       target: test
       args:
         TEST_FILTER: ${TEST_FILTER:-}
@@ -44,7 +44,7 @@ services:
   htmx:
     image: curlimages/curl:latest
     volumes:
-      - ./static/vendor:/o:ro
+      - ../static/vendor:/o:ro
     command:
       - sh
       - -c
@@ -57,15 +57,15 @@ services:
 
   wg-ez:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
     image: wg-ez:dev
     container_name: wg-ez-dev
     ports:
       - 51821:51821
       - 51820:51820/udp
     volumes:
-      - ./wg-data:/etc/wireguard
+      - ../wg-data:/etc/wireguard
       - /lib/modules:/lib/modules:ro
     cap_add:
       - NET_ADMIN
@@ -86,34 +86,34 @@ services:
     develop:
       watch:
         - action: rebuild
-          path: ./static/css/input.css
+          path: ../static/css/input.css
         - action: sync
-          path: ./static/js
+          path: ../static/js
           target: /static/js
         - action: sync
-          path: ./static/vendor
+          path: ../static/vendor
           target: /static/vendor
         - action: sync
-          path: ./static/img
+          path: ../static/img
           target: /static/img
         - action: rebuild
-          path: ./src
+          path: ../src
         - action: rebuild
-          path: ./templates
+          path: ../templates
         - action: rebuild
-          path: ./locales
+          path: ../locales
         - action: rebuild
-          path: ./Cargo.toml
+          path: ../Cargo.toml
         - action: rebuild
-          path: ./Cargo.lock
+          path: ../Cargo.lock
         - action: rebuild
-          path: ./build.rs
+          path: ../build.rs
 
   # 270 checks HTTP contre le serveur dev (`--profile audit`, reseau hote).
   audit:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: docker/Dockerfile
       target: audit
     image: wg-ez-audit
     profiles: ["audit"]

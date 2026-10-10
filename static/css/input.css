@@ -20,10 +20,13 @@
     --line-strong: #10101466;
     /* couleurs de la demo ajustees pour WCAG AA (teintes inchangees) */
     --faint: #10101499;
-    --app: #2a6fe0;
-    --app-ink: #1a5bc4;
-    --ok: #0d7a66;
-    --warn: #8f5308;
+    /* accent bleu aligne sur le fond du favicon (`static/img/favicon.svg`) */
+    --app: #2653e4;
+    --app-ink: #2653e4;
+    /* statuts rabattus sur l'accent : verts et oranges deviennent bleus ;
+       seuls gris / blanc / noir / bleu / rouge subsistent */
+    --ok: #2653e4;
+    --warn: #2653e4;
     --danger: #b3261e;
     --ease: cubic-bezier(0.4, 0, 0.2, 1);
     --dur: 0.15s;
@@ -50,8 +53,8 @@
     --line-strong: #f2f1ee66;
     --app: #1e4fa8;
     --app-ink: #8fb8ff;
-    --ok: #3fd6b8;
-    --warn: #e0a13a;
+    --ok: #8fb8ff;
+    --warn: #8fb8ff;
     --danger: #ff6259;
     color-scheme: dark;
   }
@@ -69,8 +72,8 @@
       --line-strong: #f2f1ee66;
       --app: #1e4fa8;
       --app-ink: #8fb8ff;
-      --ok: #3fd6b8;
-      --warn: #e0a13a;
+      --ok: #8fb8ff;
+      --warn: #8fb8ff;
       --danger: #ff6259;
       color-scheme: dark;
     }
@@ -1075,8 +1078,8 @@
     margin-bottom: 1.5rem;
   }
 
-  /* `.oops__code` (page d'erreur) et `.hero__logo` (login) partagent la meme
-     tuile (degrade/rayon/ombre) : selecteur groupe pour un rendu iso volontaire. */
+  /* `.oops__code` (page d'erreur) garde la tuile en degrade `--tile` ;
+     `.hero__logo` (login) utilise l'aplat du favicon (`#2653e4`), sans degrade. */
   .hero__logo,
   .oops__code {
     display: grid;
@@ -1085,9 +1088,14 @@
     height: 6rem;
     border: 0;
     border-radius: var(--tile-r);
-    background: var(--tile);
     box-shadow: 0 6px 14px rgba(0, 0, 0, 0.28);
     color: #fff;
+  }
+  .hero__logo {
+    background: #2653e4;
+  }
+  .oops__code {
+    background: var(--tile);
   }
   @media (min-width: 48rem) {
     .hero__logo,

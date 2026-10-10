@@ -35,7 +35,9 @@ use parse::{check_string, parse_bool_default, parse_port, raw};
 
 /// Interface selection mode (`IP_MODE`).
 ///
-/// - `auto` : IPv4 toujours actif, IPv6 depend de la detection noyau ;
+/// - `auto` : chaque famille suit sa detection (conteneur sans IPv6 global
+///   -> IPv4 seul ; sans route IPv4 -> IPv6 seul ; ni l'un ni l'autre ->
+///   double pile par prudence pour ne jamais demarrer sans famille) ;
 /// - `ipv4` : IPv4 seul ; `ipv6` : IPv6 seul ; `both` : les deux.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IpMode {
@@ -47,9 +49,13 @@ pub enum IpMode {
 
 impl IpMode {
     /// `(disable_ipv4, disable_ipv6)`.
-    pub fn flags(self, ipv6_available: bool) -> (bool, bool) {
+    pub fn flags(self, ipv4_available: bool, ipv6_available: bool) -> (bool, bool) {
         match self {
-            IpMode::Auto => (false, !ipv6_available),
+            IpMode::Auto => match (ipv4_available, ipv6_available) {
+                (true, true) | (false, false) => (false, false),
+                (true, false) => (false, true),
+                (false, true) => (true, false),
+            },
             IpMode::Ipv4 => (false, true),
             IpMode::Ipv6 => (true, false),
             IpMode::Both => (false, false),
@@ -57,25 +63,141 @@ impl IpMode {
     }
 }
 
-/// Detection de la disponibilite IPv6 du conteneur/noyau au demarrage.
+/// Detection de la disponibilite IPv4 du conteneur au demarrage.
 ///
-/// `IP_MODE` permet de forcer ; en `auto` cette fonction decide. On lit
-/// d'abord le drapeau noyau (`/proc/net` peut etre absent hors Linux), puis
-/// on retombe sur un bind `[::]:0` : un noyau avec IPv6 desactive refuse la
-/// socket, ce qui est exactement « pas d'IPv6 pour WireGuard ».
-pub fn detect_ipv6_available() -> bool {
-    if let Ok(v) = std::fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6") {
-        return v.trim() == "0";
+/// En `auto`, symetrique d'IPv6 : on exige une route IPv4 (`/proc/net/route`)
+/// sur une interface autre que `lo` et autre que l'interface WireGuard
+/// elle-meme (sinon la route `10.8.0.0/24` d'une precedente `.conf`
+/// auto-entretiendrait la detection). Un conteneur IPv6-only (aucune route
+/// IPv4 hors `lo`) donne donc `false`. Hors Linux (`/proc` absent) on retombe
+/// sur un bind `0.0.0.0:0`.
+pub fn detect_ipv4_available() -> bool {
+    let exclude = std::env::var("WG_INTERFACE").unwrap_or_else(|_| "wg0".to_string());
+    detect_ipv4_available_except(&exclude)
+}
+
+/// Variante testable de [`detect_ipv4_available`] (interface exclue explicite).
+pub fn detect_ipv4_available_except(exclude_iface: &str) -> bool {
+    match std::fs::read_to_string("/proc/net/route") {
+        Ok(content) => has_usable_ipv4_route(&content, exclude_iface),
+        Err(_) => std::net::UdpSocket::bind("0.0.0.0:0").is_ok(),
     }
-    std::net::UdpSocket::bind("[::]:0").is_ok()
+}
+
+/// Vrai si `/proc/net/route` expose une route IPv4 utilisable.
+///
+/// Format noyau : en-tete `Iface Destination Gateway Flags ...`, une ligne par
+/// route (`Destination`/`Flags` en hex). On ignore `lo`, l'interface exclue et
+/// les routes non `RTF_UP` (bit `0x1` des flags).
+fn has_usable_ipv4_route(content: &str, exclude_iface: &str) -> bool {
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let mut parts = line.split_whitespace();
+        let (Some(dev), Some(_dst), Some(_gw), Some(flags)) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            continue;
+        };
+        if dev == "Iface" || dev == "lo" || dev == exclude_iface {
+            continue;
+        }
+        if u32::from_str_radix(flags, 16).is_ok_and(|f| f & 0x1 == 0) {
+            continue;
+        }
+        if interface_up(dev).unwrap_or(true) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Detection de la disponibilite IPv6 du conteneur au demarrage.
+///
+/// `IP_MODE` permet de forcer ; en `auto` cette fonction decide. Le seul
+/// drapeau noyau (`.../disable_ipv6 == 0`) ne suffit pas : il est a `0` sur
+/// presque tous les hotes Docker meme quand le conteneur n'a aucun reseau
+/// IPv6 attache (cas remonte : conteneur sur `bridge` IPv4 seul, IPv6 present
+/// dans `.conf` alors qu'attendu en IPv4 seul). On exige donc une adresse
+/// IPv6 globale (scope `00` dans `/proc/net/if_inet6`) sur une interface
+/// autre que `lo` et autre que l'interface WireGuard elle-meme (sinon une
+/// precedente `.conf` avec ULA `fd00:...` auto-entretiendrait la detection).
+/// Les loopback (`::1`, scope `10`) et link-local (`fe80::/10`, scope `20`)
+/// ne comptent pas. Hors Linux (`/proc` absent) on retombe sur un bind
+/// `[::]:0`.
+pub fn detect_ipv6_available() -> bool {
+    let exclude = std::env::var("WG_INTERFACE").unwrap_or_else(|_| "wg0".to_string());
+    detect_ipv6_available_except(&exclude)
+}
+
+/// Variante testable de [`detect_ipv6_available`] (interface exclue explicite).
+pub fn detect_ipv6_available_except(exclude_iface: &str) -> bool {
+    if std::fs::read_to_string("/proc/sys/net/ipv6/conf/all/disable_ipv6")
+        .is_ok_and(|v| v.trim() == "1")
+    {
+        return false;
+    }
+    match std::fs::read_to_string("/proc/net/if_inet6") {
+        Ok(content) => has_global_ipv6(&content, exclude_iface),
+        Err(_) => std::net::UdpSocket::bind("[::]:0").is_ok(),
+    }
+}
+
+/// Vrai si le contenu de `/proc/net/if_inet6` expose une adresse globale.
+///
+/// Format noyau par ligne : `<addr32hex> <ifindex> <prefixlen> <scope> <flags> <dev>`
+/// (`scope` en hex : `00` global, `10` hote/loopback, `20` lien). On ignore les
+/// adresses `tentative` (DAD en cours, bit `0x40` des flags) et les interfaces
+/// `lo` / exclue.
+fn has_global_ipv6(content: &str, exclude_iface: &str) -> bool {
+    content.lines().any(|line| {
+        let mut parts = line.split_whitespace();
+        let (Some(addr), Some(_idx), Some(_plen), Some(scope), Some(flags), Some(dev)) = (
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+            parts.next(),
+        ) else {
+            return false;
+        };
+        if !scope.eq_ignore_ascii_case("00") {
+            return false;
+        }
+        if addr.eq_ignore_ascii_case("00000000000000000000000000000001") {
+            return false;
+        }
+        if dev == "lo" || dev == exclude_iface {
+            return false;
+        }
+        if u8::from_str_radix(flags, 16).is_ok_and(|f| f & 0x40 != 0) {
+            return false;
+        }
+        interface_up(dev).unwrap_or(true)
+    })
+}
+
+/// Best-effort : `false` si `/sys/class/net/<dev>/operstate` vaut `down` ou
+/// `dormant`. `None` (fichier illisible, non-Linux) = on ne filtre pas.
+fn interface_up(dev: &str) -> Option<bool> {
+    let state = std::fs::read_to_string(format!("/sys/class/net/{dev}/operstate")).ok()?;
+    let s = state.trim().to_ascii_lowercase();
+    if s == "down" || s == "dormant" {
+        Some(false)
+    } else {
+        Some(true)
+    }
 }
 
 /// Resout `IP_MODE` en drapeaux de famille.
 ///
-/// `IP_MODE` est l'unique levier : `auto` (defaut, detection IPv6),
+/// `IP_MODE` est l'unique levier : `auto` (defaut, detection IPv4 + IPv6),
 /// `ipv4`, `ipv6` ou `both`. Toute autre valeur refuse le boot.
 pub fn resolve_ip_mode(
     env: &HashMap<String, String>,
+    ipv4_available: bool,
     ipv6_available: bool,
 ) -> Result<(bool, bool), ConfigError> {
     let mode = match raw(env, "IP_MODE") {
@@ -93,7 +215,7 @@ pub fn resolve_ip_mode(
             }
         },
     };
-    Ok(mode.flags(ipv6_available))
+    Ok(mode.flags(ipv4_available, ipv6_available))
 }
 
 const MIGRATION_POINTER: &str = "v14 PASSWORD/PASSWORD_HASH were removed in v15; follow the v14 -> v15 migration guide \
@@ -176,7 +298,11 @@ impl AppConfig {
             None => "/etc/wireguard".to_string(),
         };
 
-        let (disable_ipv4, disable_ipv6) = resolve_ip_mode(env, detect_ipv6_available())?;
+        let (disable_ipv4, disable_ipv6) = resolve_ip_mode(
+            env,
+            detect_ipv4_available_except(&wg_interface),
+            detect_ipv6_available_except(&wg_interface),
+        )?;
 
         Ok(Self {
             host,
@@ -368,34 +494,40 @@ mod tests {
     fn ip_mode_resolution() -> Result<(), ConfigError> {
         // Explicite : ne depend jamais de la detection.
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "ipv4")]), true)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "ipv4")]), true, true)?,
             (false, true)
         );
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "ipv6")]), true)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "ipv6")]), true, true)?,
             (true, false)
         );
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "both")]), false)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "both")]), false, false)?,
             (false, false)
         );
-        // auto : IPv6 present -> dual, absent -> IPv4 seul.
-        assert_eq!(resolve_ip_mode(&env(&[]), true)?, (false, false));
-        assert_eq!(resolve_ip_mode(&env(&[]), false)?, (false, true));
+        // auto : matrice symetrique ; ni l'un ni l'autre -> double pile (fail-open).
+        assert_eq!(resolve_ip_mode(&env(&[]), true, true)?, (false, false));
+        assert_eq!(resolve_ip_mode(&env(&[]), true, false)?, (false, true));
+        assert_eq!(resolve_ip_mode(&env(&[]), false, true)?, (true, false));
+        assert_eq!(resolve_ip_mode(&env(&[]), false, false)?, (false, false));
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "auto")]), false)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "auto")]), true, false)?,
             (false, true)
+        );
+        assert_eq!(
+            resolve_ip_mode(&env(&[("IP_MODE", "auto")]), false, true)?,
+            (true, false)
         );
         // Valeurs alternatives et casse.
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "IPv4")]), true)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "IPv4")]), true, true)?,
             (false, true)
         );
         assert_eq!(
-            resolve_ip_mode(&env(&[("IP_MODE", "dual")]), true)?,
+            resolve_ip_mode(&env(&[("IP_MODE", "dual")]), true, true)?,
             (false, false)
         );
-        assert!(resolve_ip_mode(&env(&[("IP_MODE", "nope")]), true).is_err());
+        assert!(resolve_ip_mode(&env(&[("IP_MODE", "nope")]), true, true).is_err());
         Ok(())
     }
 
@@ -407,5 +539,51 @@ mod tests {
         assert!(!cfg.ipv4_enabled());
         assert!(cfg.ipv6_enabled());
         Ok(())
+    }
+
+    /// La detection `auto` exige une adresse globale : loopback + link-local
+    /// seuls (conteneur sur bridge IPv4, cas remonte) = pas d'IPv6.
+    #[test]
+    fn has_global_ipv6_ignores_loopback_and_linklocal() {
+        let v4_only = "00000000000000000000000000000001 01 80 10 80 lo\n\
+             fe800000000000000242acfffe140002 02 40 20 80 eth0\n";
+        assert!(!super::has_global_ipv6(v4_only, "wg0"));
+        // Ligne malformee = ignoree, jamais de panique.
+        assert!(!super::has_global_ipv6("nonsense\n", "wg0"));
+        assert!(!super::has_global_ipv6("", "wg0"));
+    }
+
+    /// Une globale sur `eth0` compte ; sur `wg0` (ULA d'une precedente conf)
+    /// ou en `tentative` (DAD), non.
+    #[test]
+    fn has_global_ipv6_counts_only_usable_global() {
+        let with_global = "00000000000000000000000000000001 01 80 10 80 lo\n\
+             20010db8000000000000000000000001 02 80 00 80 eth0\n";
+        assert!(super::has_global_ipv6(with_global, "wg0"));
+        let wg_only = "fd00deadbeefcafe0000000000000001 0a 80 00 80 wg0\n";
+        assert!(!super::has_global_ipv6(wg_only, "wg0"));
+        let tentative = "20010db8000000000000000000000002 02 80 00 40 eth0\n";
+        assert!(!super::has_global_ipv6(tentative, "wg0"));
+    }
+
+    /// Routes IPv4 : `eth0` compte, `lo` / `wg0` / route `DOWN` seuls non.
+    #[test]
+    fn has_usable_ipv4_route_ignores_lo_wg_and_down() {
+        let h =
+            "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n";
+        let lo = "lo\t00000000\t0100007F\t0003\t0\t0\t0\t00000000\t0\t0\t0\n";
+        assert!(!super::has_usable_ipv4_route(&format!("{h}{lo}"), "wg0"));
+        let eth_def = "eth0\t00000000\t010014AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n";
+        let eth_net = "eth0\t0014AC\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n";
+        assert!(!super::has_usable_ipv4_route(h, "wg0"));
+        assert!(super::has_usable_ipv4_route(
+            &format!("{h}{eth_def}{eth_net}"),
+            "wg0"
+        ));
+        let wg = "wg0\t0008080A\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n";
+        assert!(!super::has_usable_ipv4_route(&format!("{h}{wg}"), "wg0"));
+        let down = "eth0\t00000000\t010014AC\t0000\t0\t0\t0\t00000000\t0\t0\t0\n";
+        assert!(!super::has_usable_ipv4_route(&format!("{h}{down}"), "wg0"));
+        assert!(!super::has_usable_ipv4_route("", "wg0"));
     }
 }
