@@ -5,7 +5,7 @@
 <h1 align="center">wg-ez</h1>
 
 <p align="center">
-  WireGuard server + Web UI + offline CLI in one static binary.
+  A modern WireGuard manager packaged into a single static Rust binary, using 1MB of RAM.
 </p>
 
 <p align="center">
