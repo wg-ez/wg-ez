@@ -49,6 +49,7 @@ networks:
 ## Docs
 
 - [Setup & rescue](docs/setup.md) — options, reverse proxy, password reset
+- [REST API](docs/api.md) — auth, routes, examples
 - [Development](docs/development.md) — build, tests, audit
 
 ## License
