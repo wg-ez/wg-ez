@@ -58,7 +58,7 @@ macro_rules! pair {
             ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
             Auth(auth): Auth,
             headers: HeaderMap,
-            PatchBody(patch): PatchBody,
+            PatchBody { patch, is_json }: PatchBody,
         ) -> Result<Response, WebError> {
             super::check_mutation_limit(&state, addr, &headers).await?;
             admin(&auth)?;
@@ -67,7 +67,7 @@ macro_rules! pair {
             // réglages a réellement changé, il faut un `down`+`up` (le tunnel
             // est brièvement coupé). Sinon on reste sur un apply à chaud.
             let before = state.backend.$get_b().await?;
-            let patch = coerce_patch(patch, $lists, $bools, $nums, &[]);
+            let patch = coerce_patch(patch, $lists, $bools, $nums, &[], is_json);
             let out = state.backend.$set_b(patch).await?;
             if restart_needed(&before, &out, $restart_keys) {
                 state.backend.restart_interface().await?;

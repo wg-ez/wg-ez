@@ -186,7 +186,7 @@ pub async fn update<B: Backend>(
     Auth(auth): Auth,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    PatchBody(patch): PatchBody,
+    PatchBody { patch, is_json }: PatchBody,
 ) -> Result<Response, WebError> {
     super::check_mutation_limit(&state, addr, &headers).await?;
     load_client(&state, &auth, id, "clients.update").await?;
@@ -197,6 +197,7 @@ pub async fn update<B: Backend>(
         &CLIENT_BOOLS,
         &CLIENT_NUMS,
         &CLIENT_NULLABLES,
+        is_json,
     );
     let client = state.backend.update_client(id, patch).await?;
     state.backend.apply_tunnel().await?;

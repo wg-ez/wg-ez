@@ -157,10 +157,18 @@ pub fn normalize_bools(mut v: Value, keys: &[&str]) -> Value {
 /// send typed values); urlencoded forms arrive as flat strings and are
 /// parsed by hand (`percent-encoding` is already in the stack, no new dep).
 ///
+/// `is_json` records which branch was taken so [`coerce_patch`] can keep the
+/// checkbox rule (absent key = unchecked = `false`) for urlencoded forms
+/// only. A JSON PATCH is explicit: absent keys stay absent and never flip a
+/// stored boolean (a partial `{"mtu": 1420}` must not disable the client).
+///
 /// The body is buffered through the `Bytes` extractor so the global
 /// `DefaultBodyLimit` (M12) applies to it too — the handler never reads an
 /// unbounded body.
-pub struct PatchBody(pub Value);
+pub struct PatchBody {
+    pub patch: Value,
+    pub is_json: bool,
+}
 
 impl<S> FromRequest<S> for PatchBody
 where
@@ -195,9 +203,15 @@ where
                 tracing::debug!("invalid JSON body: {e}");
                 WebError::bad_request("invalid JSON body")
             })?;
-            return Ok(Self(v));
+            return Ok(Self {
+                patch: v,
+                is_json: true,
+            });
         }
-        Ok(Self(parse_form(&bytes)?))
+        Ok(Self {
+            patch: parse_form(&bytes)?,
+            is_json: false,
+        })
     }
 }
 
@@ -229,19 +243,26 @@ fn parse_form(bytes: &[u8]) -> Result<Value, WebError> {
     }
 }
 
-/// Coerce a form-origin (all-string) patch into typed JSON. JSON-origin
-/// values that already have the right type are left untouched; only
-/// `String` values are transformed:
+/// Coerce a patch into typed JSON. String-only values are transformed
+/// whatever the origin (form or JSON):
 /// - `lists`: `""` -> `null` (inherit), `"a, b"` -> `["a", "b"]`.
-/// - `bools`: `"true"/"on"/"1"` -> true, anything else (or absent) -> false.
 /// - `nums`: integer-looking strings -> Number, else left as-is.
 /// - `nullables`: `""` -> `null` (e.g. `expiresAt` = permanent).
+///
+/// Booleans depend on the origin (`is_json` from [`PatchBody`]):
+/// - form (`false`): `"true"/"on"/"1"` -> true, anything else (or absent) ->
+///   false (unchecked checkbox sends nothing).
+/// - JSON (`true`): present values are normalized the same way, but an
+///   absent key stays absent so a partial PATCH never flips a stored
+///   boolean. `null`/other types are left as-is for the backend to refuse
+///   with 400 instead of silently disabling.
 pub fn coerce_patch(
     mut v: Value,
     lists: &[&str],
     bools: &[&str],
     nums: &[&str],
     nullables: &[&str],
+    is_json: bool,
 ) -> Value {
     if let Value::Object(map) = &mut v {
         for k in lists {
@@ -276,7 +297,45 @@ pub fn coerce_patch(
             }
         }
     }
-    normalize_bools(v, bools)
+    if is_json {
+        normalize_json_bools(v, bools)
+    } else {
+        normalize_bools(v, bools)
+    }
+}
+
+/// JSON-origin booleans: present values are normalized like form values
+/// (`"true"/"on"/"1"` or non-zero number -> true, `Bool` kept), but an
+/// absent key stays absent — a partial JSON PATCH must never flip a stored
+/// boolean. `null` (or any other type) is left as-is so the backend refuses
+/// it with 400 instead of silently mapping it to `false`.
+pub fn normalize_json_bools(mut v: Value, keys: &[&str]) -> Value {
+    if let Value::Object(ref mut map) = v {
+        for k in keys {
+            match map.remove(*k) {
+                None => {}
+                Some(Value::String(s)) => {
+                    map.insert(
+                        (*k).to_owned(),
+                        Value::Bool(s == "true" || s == "on" || s == "1"),
+                    );
+                }
+                Some(Value::Bool(b)) => {
+                    map.insert((*k).to_owned(), Value::Bool(b));
+                }
+                Some(Value::Number(n)) => {
+                    map.insert(
+                        (*k).to_owned(),
+                        Value::Bool(n.as_i64().is_some_and(|i| i != 0)),
+                    );
+                }
+                Some(other) => {
+                    map.insert((*k).to_owned(), other);
+                }
+            }
+        }
+    }
+    v
 }
 
 #[cfg(test)]
@@ -301,6 +360,7 @@ mod tests {
             &["enabled"],
             &["mtu"],
             &["expiresAt"],
+            false,
         );
         assert_eq!(out["name"], json!("bob"));
         assert_eq!(out["enabled"], json!(true));
@@ -310,14 +370,60 @@ mod tests {
         assert_eq!(out["expiresAt"], json!(null));
         // JSON-origin typed values pass through untouched.
         let v2 = json!({ "enabled": true, "mtu": 1500, "allowedIps": ["a"], "name": "123" });
-        let out2 = coerce_patch(v2, &["allowedIps"], &["enabled"], &["mtu"], &[]);
+        let out2 = coerce_patch(v2, &["allowedIps"], &["enabled"], &["mtu"], &[], true);
         assert_eq!(out2["name"], json!("123"));
         assert_eq!(out2["mtu"], json!(1500));
         // non-regression : une liste JSON deja typee n'est pas supprimee.
         assert_eq!(out2["allowedIps"], json!(["a"]));
-        // absent checkbox -> false.
-        let out3 = coerce_patch(json!({}), &[], &["firewallEnabled"], &[], &[]);
+        // absent checkbox (form origin) -> false.
+        let out3 = coerce_patch(json!({}), &[], &["firewallEnabled"], &[], &[], false);
         assert_eq!(out3["firewallEnabled"], json!(false));
+    }
+
+    #[test]
+    fn json_absent_bools_stay_absent() {
+        // Non-regression du bug "PATCH partiel JSON sans `enabled` :
+        // le client etait desactive en silence". En origine JSON, une cle
+        // absente reste absente ; une valeur presente garde l'ancienne
+        // normalisation.
+        let out = coerce_patch(
+            json!({ "mtu": 1420 }),
+            &[],
+            &["enabled"],
+            &["mtu"],
+            &[],
+            true,
+        );
+        assert!(out.get("enabled").is_none());
+        assert_eq!(out["mtu"], json!(1420));
+        let off = coerce_patch(
+            json!({ "enabled": false }),
+            &[],
+            &["enabled"],
+            &[],
+            &[],
+            true,
+        );
+        assert_eq!(off["enabled"], json!(false));
+        let on = coerce_patch(
+            json!({ "enabled": "on" }),
+            &[],
+            &["enabled"],
+            &[],
+            &[],
+            true,
+        );
+        assert_eq!(on["enabled"], json!(true));
+        // `null` JSON n'eteint plus en silence : le backend le refuse en 400.
+        let null = coerce_patch(
+            json!({ "enabled": null }),
+            &[],
+            &["enabled"],
+            &[],
+            &[],
+            true,
+        );
+        assert!(null.get("enabled").is_some_and(Value::is_null));
     }
 
     #[test]
@@ -336,6 +442,7 @@ mod tests {
             &[],
             &[],
             &[],
+            true,
         );
         assert_eq!(out["allowedIps"], json!(["10.99.0.0/24"]));
         assert_eq!(out["firewallIps"], json!(["0.0.0.0/0:51820"]));
@@ -343,17 +450,24 @@ mod tests {
         assert_eq!(out["serverAllowedIps"], json!(["10.50.0.0/16"]));
         // `null` JSON = heritage : conserve tel quel, jamais retire du patch.
         let v2 = json!({ "allowedIps": null, "dns": null, "name": "bob" });
-        let out2 = coerce_patch(v2, &["allowedIps", "dns"], &[], &[], &[]);
+        let out2 = coerce_patch(v2, &["allowedIps", "dns"], &[], &[], &[], true);
         assert!(out2.get("allowedIps").is_some_and(Value::is_null));
         assert!(out2.get("dns").is_some_and(Value::is_null));
         assert_eq!(out2["name"], json!("bob"));
         // Tableau vide JSON : conserve (c'est une liste explicite, pas un champ
         // de formulaire vide qui deviendrait `null`).
         let v3 = json!({ "serverAllowedIps": [] });
-        let out3 = coerce_patch(v3, &["serverAllowedIps"], &[], &[], &[]);
+        let out3 = coerce_patch(v3, &["serverAllowedIps"], &[], &[], &[], true);
         assert_eq!(out3["serverAllowedIps"], json!([]));
         // Une cle de `lists` absente reste absente.
-        let out4 = coerce_patch(json!({ "name": "bob" }), &["allowedIps"], &[], &[], &[]);
+        let out4 = coerce_patch(
+            json!({ "name": "bob" }),
+            &["allowedIps"],
+            &[],
+            &[],
+            &[],
+            true,
+        );
         assert!(out4.get("allowedIps").is_none());
     }
 

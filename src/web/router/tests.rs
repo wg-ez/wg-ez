@@ -318,7 +318,14 @@ impl Backend for TestBackend {
         // validation de production (comme `set_general` avec `general_update`)
         // pour que le 400 M4 d'un DNS invalide soit exerce via le vrai routeur.
         crate::web::backend::parse_client_update(&p)?;
-        Ok(sample_client())
+        // Echo d'un `enabled: false` explicite : prouve quel patch le handler
+        // a transmis apres `coerce_patch` (non-regression du bug "PATCH JSON
+        // partiel sans `enabled`", qui eteignait le client en silence).
+        let mut c = sample_client();
+        if p.get("enabled") == Some(&Value::Bool(false)) {
+            c.enabled = false;
+        }
+        Ok(c)
     }
     async fn delete_client(&self, _id: i64) -> Result<(), WebError> {
         Ok(())
@@ -2039,6 +2046,74 @@ async fn client_dns_patch_is_validated_by_the_router() {
     )
     .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "wrong family must be rejected");
+}
+
+/// Non-regression du bug live "PATCH JSON partiel sans `enabled`" : un
+/// `{"mtu":...}` JSON eteignait le client en silence car `coerce_patch`
+/// appliquait la regle checkbox (absent = `false`) aux corps JSON. Prouve via
+/// le vrai routeur : le backend de test repercute un `enabled: false`
+/// explicite, donc la reponse montre quel patch le handler a transmis.
+#[tokio::test]
+async fn json_partial_patch_without_enabled_keeps_client_on() {
+    let app = build_router(finished_state());
+
+    // JSON sans `enabled` : reste allume.
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/client/1",
+        Some("wg-ez=valid"),
+        r#"{"mtu":1500}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "partial JSON patch: {body}");
+    assert!(
+        body.contains(r#""enabled":true"#),
+        "a partial JSON patch must not disable the client: {body}"
+    );
+
+    // JSON avec `enabled: false` explicite : toujours honore.
+    let (s, _, body) = post_json(
+        app,
+        "/api/client/1",
+        Some("wg-ez=valid"),
+        r#"{"enabled":false}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "explicit disable: {body}");
+    assert!(
+        body.contains(r#""enabled":false"#),
+        "an explicit disable must still work: {body}"
+    );
+}
+
+/// Pendant formulaire : la semantique checkbox est inchangee (cle absente =
+/// decoche = `false`), l'UI en depend (`ui::hidden` rejoue `enabled`).
+#[tokio::test]
+async fn form_patch_without_enabled_still_disables() {
+    let app = build_router(finished_state());
+    let mut built = Request::builder()
+        .method("POST")
+        .uri("/api/client/1")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("cookie", "wg-ez=valid")
+        .body(Body::from("mtu=1500"))
+        .unwrap();
+    built
+        .extensions_mut()
+        .insert(ConnectInfo(std::net::SocketAddr::from((
+            std::net::IpAddr::from([127, 0, 0, 1]),
+            12345,
+        ))));
+    let res = app.oneshot(built).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body).into_owned();
+    assert!(
+        body.contains(r#""enabled":false"#),
+        "a form patch without the checkbox must still read as unchecked: {body}"
+    );
 }
 
 // ---------------------------------------------------------------------------
