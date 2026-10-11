@@ -21,7 +21,7 @@
              cache, donc rien a refleter cote page. Le bouton fantome
              d'annulation (`hx-post /api/auth/cancel`) reste hors `ui::submit`. #}
           <form class="form" method="post" action="/api/auth/verify-2fa" hx-post="/api/auth/verify-2fa" hx-swap="none">
-            {{ ui::field(code_label, "text", "code", "", "one-time-code", "", "[0-9]{6}", "numeric", "6", false, true) }}
+            {{ ui::field(code_label, "text", "code", "", "one-time-code", "", "[0-9]{6}", "numeric", "6", false, true, "", "", "", false, true) }}
             <div class="actions">
               <button class="btn" type="submit">{{ t_verify }}</button>
               <button class="btn btn--ghost" type="button" hx-post="/api/auth/cancel" hx-swap="none">{{ t_cancel }}</button>
