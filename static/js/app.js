@@ -14,7 +14,7 @@ L("click",e=>{const b=e.target.closest("[data-do]");if(b){const t=b.textContent.
  else if(e.target===MD||e.target.closest(".modal__x"))MD.close()});
 /* hx-confirm -> modale */
 L("htmx:confirm",e=>{const d=e.detail;if(!d.question)return;e.preventDefault();const t=d.elt.textContent.trim(),k=E("div","modal__f"),c=E("button","btn btn--ghost",MD.dataset.cancel),b=E("button","btn btn--danger",t);c.type="button";c.dataset.do="close";b.type="button";b.id="mk";k.append(E("p","muted",d.question),c,b);O(t,k);$("#mk",MD).onclick=()=>{MD.close();d.issueRequest(true)}});
-L("submit",async e=>{if(e.target.id!=="mf")return;e.preventDefault();const n=e.target.name.value.trim();if(!n)return;try{const r=await(await fetch("/api/client",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:n})})).json();MD.close();location.href="/clients/"+r.id}catch(x){T(x.message)}});
+L("submit",async e=>{if(e.target.id!=="mf")return;e.preventDefault();const n=e.target.name.value.trim();if(!n)return;try{await(await fetch("/api/client",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:n})})).json();MD.close();location.href="/"}catch(x){T(x.message)}});
 L("htmx:afterRequest",async e=>{let t;try{t=JSON.parse(e.detail.xhr.getResponseHeader("HX-Trigger"))}catch(x){}if(!t)return;if(t.toast)T(t.toast);
  if(t.hooks){const h=await(await fetch("/api/admin/hooks")).json();["preUp","postUp","preDown","postDown"].forEach(k=>{const q=$(`[name="${k}"]`);if(q)q.value=h[k]})}
  if(t.otl){try{await navigator.clipboard.writeText(location.origin+"/cnf/"+t.otl)}catch{}
