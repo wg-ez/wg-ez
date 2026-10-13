@@ -3,4 +3,4 @@
    `action=start`). Le marqueur vit en `ui::totp_box` (QR + secret +
    confirmation, contrat d'`id` `#totp-box`/`#totp-start`) ; ce fichier ne porte
    que l'appel. #}
-{{ ui::totp_box(secret, qr_svg, t_secret_k, t_code, t_verify) }}
+{{ ui::totp_box(secret, qr_svg, t_secret_k, t_code, t_verify, t_password) }}

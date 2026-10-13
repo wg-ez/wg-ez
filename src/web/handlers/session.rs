@@ -159,11 +159,11 @@ pub async fn totp<B: Backend>(
     check(&auth, "me.update", Some(auth.user_id))?;
     match body.action.as_str() {
         "start" => {
-            // I2: the backend enforces the current-password check when a
-            // verified 2FA already exists; the handler only forwards it.
+            // Preuve du mot de passe courant exigée par le backend, y compris
+            // pour le premier enrôlement (le handler ne fait que transmettre).
             let setup = state
                 .backend
-                .totp_setup_start(auth.user_id, body.password.as_deref())
+                .totp_setup_start(auth.user_id, body.password.as_deref().unwrap_or_default())
                 .await?;
             if crate::web::ctx::is_hx(&headers) {
                 let lang = crate::web::handlers::ui::page_prefs(
@@ -180,6 +180,7 @@ pub async fn totp<B: Backend>(
                     t_secret_k: t("me.totp_secret"),
                     t_code: t("me.totp_code"),
                     t_verify: t("me.totp_verify"),
+                    t_password: t("me.current_password"),
                 };
                 return crate::web::handlers::ui::render_fragment(&page);
             }
@@ -192,7 +193,11 @@ pub async fn totp<B: Backend>(
             }
             state
                 .backend
-                .totp_setup_confirm(auth.user_id, &code)
+                .totp_setup_confirm(
+                    auth.user_id,
+                    &code,
+                    body.password.as_deref().unwrap_or_default(),
+                )
                 .await?;
             // Le formulaire de confirmation est en `hx-swap="none"` (le JSON
             // ne doit JAMAIS finir dans le DOM) : l'UI suit via le trigger

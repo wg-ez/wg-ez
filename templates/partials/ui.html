@@ -316,11 +316,12 @@ hx-vals='{"lang": "{{ lang }}"}'
 {# Bloc de configuration TOTP (`div.totp#totp-box`) entier : QR (fond blanc
    `.qr`), secret en `dl.kv.kv--flush` a `dd.secret` (colonne + retour a la
    ligne : `.totp .kv` / `.totp .secret`), formulaire de confirmation
-   (`action=confirm`). Une seule definition du contrat d'`id` : `#totp-start`
-   est masque par `.panel:has(#totp-box) #totp-start` des que le bloc est
-   injecte dans `#totp-slot`, sans JS. Route `/api/me/totp` figee : macro
-   specifique `/me`. #}
-{% macro totp_box(secret, qr_svg, t_secret_k, t_code, t_verify) -%}
+   (`action=confirm` + `code` + mot de passe courant, la confirmation exige la
+   même preuve que le démarrage). Une seule definition du contrat d'`id` :
+   `#totp-start` est masque par `.panel:has(#totp-box) #totp-start` des que le
+   bloc est injecte dans `#totp-slot`, sans JS. Route `/api/me/totp` figee :
+   macro specifique `/me`. #}
+{% macro totp_box(secret, qr_svg, t_secret_k, t_code, t_verify, t_password) -%}
 <div class="totp" id="totp-box">
   <div class="qr">{{ qr_svg|safe }}</div>
   <dl class="kv kv--flush">
@@ -332,6 +333,7 @@ hx-vals='{"lang": "{{ lang }}"}'
   <form class="form" hx-post="/api/me/totp" hx-swap="none">
     {{ hidden("action", "confirm") }}
     {{ field(t_code, "text", "code", "", "one-time-code", "", "[0-9]{6}", "numeric", "6", false, true) }}
+    {{ field(t_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
     {{ submit(t_verify, false) }}
   </form>
 </div>

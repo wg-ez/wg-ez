@@ -5,7 +5,7 @@
 use askama::Template;
 use axum::{
     extract::{ConnectInfo, Path, Query, State},
-    http::HeaderMap,
+    http::{HeaderMap, StatusCode},
     response::Response,
 };
 use axum_extra::extract::CookieJar;
@@ -277,7 +277,16 @@ pub async fn client_detail<B: Backend>(
         .get_client(id)
         .await?
         .ok_or_else(|| WebError::not_found("client not found"))?;
-    check(&auth, "clients.view", Some(c.user_id))?;
+    // Anti-enumeration comme `handlers/client.rs::load_client` : un CLIENT qui
+    // sonde l'id d'un autre obtient le même 404 qu'un id inconnu (pas de 403
+    // oracle). Toute autre erreur (500, permission inconnue) est propagée.
+    check(&auth, "clients.view", Some(c.user_id)).map_err(|e| {
+        if e.status() == StatusCode::FORBIDDEN {
+            WebError::not_found("client not found")
+        } else {
+            e
+        }
+    })?;
     let def = state.backend.global_defaults().await.unwrap_or_default();
     let join = |v: Option<&Vec<String>>| v.map(|x| x.join(", ")).unwrap_or_default();
     let base = Base::load(

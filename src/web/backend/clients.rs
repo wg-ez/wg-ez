@@ -305,7 +305,13 @@ pub(crate) fn parse_client_update(patch: &Value) -> Result<ClientUpdate, WebErro
                         .map_err(|e| WebError::bad_request(e.to_string()))?;
                     // A port is required as soon as a proto is present
                     // (`IP:port[/tcp|/udp]`); `IP/proto` alone is invalid.
-                    firewall::parse_entry(entry)
+                    let rule = firewall::parse_entry(entry)
+                        .map_err(|e| WebError::bad_request(e.to_string()))?;
+                    // La destination part verbatim en `-d` iptables : exiger
+                    // une IP/CIDR comme `allowedIps` (noms, `*`, prefixe
+                    // invalide refusés), sinon une ligne empoisonnée fait
+                    // avorter tout le `Tunnel::apply` avant le `DROP` final.
+                    crate::validate::validate_ip_or_cidr(&rule.dest)
                         .map_err(|e| WebError::bad_request(e.to_string()))?;
                 }
                 Ok(())

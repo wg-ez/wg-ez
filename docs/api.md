@@ -100,7 +100,7 @@ Auth required (cookie or Basic).
 | `POST /api/me` | Update display name. Body `{ "name": "..." }` (1–128 chars). |
 | `POST /api/me/username` | Change login. Body `{ "currentPassword": "...", "username": "..." }`. |
 | `POST /api/me/password` | Change password. Body `{ "currentPassword": "...", "newPassword": "..." }` (12+ chars). |
-| `POST /api/me/totp` | Body `{ "action": "start\|confirm\|remove", "code"?, "password"? }`. `start` → `{ "secret", "otpauth_url", "qr_svg" }` (JSON API; htmx gets an HTML fragment). `confirm` needs 6-digit `code`. `remove` needs current `password`. |
+| `POST /api/me/totp` | Body `{ "action": "start\|confirm\|remove", "code"?, "password"? }`. `start` needs current `password` (even for first enrollment) → `{ "secret", "otpauth_url", "qr_svg" }` (JSON API; htmx gets an HTML fragment). `confirm` needs 6-digit `code` + current `password`. `remove` needs current `password`. |
 
 ## Clients
 

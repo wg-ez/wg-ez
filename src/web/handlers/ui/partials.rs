@@ -113,6 +113,7 @@ pub struct TotpStartPartial {
     pub t_secret_k: String,
     pub t_code: String,
     pub t_verify: String,
+    pub t_password: String,
 }
 
 /// Libelles partages par `/me` : source unique des cles i18n utilisees a la

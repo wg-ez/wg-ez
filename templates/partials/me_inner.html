@@ -54,10 +54,10 @@
 
     {% if user.totp_enabled %}
       {{ ui::pill(t_totp_enabled, "live", false) }}
-      {# Toute modification d'une 2FA active (suppression comme regeneration)
-         exige le mot de passe courant : le champ `password` ci-dessous est la
-         garde reutilisee ; le backend refuse aussi un `start` sans mot de passe
-         sur un compte verifie. #}
+      {# Toute modification de la 2FA (démarrage, confirmation, suppression,
+         régénération) exige le mot de passe courant : le champ `password`
+         ci-dessous est la garde réutilisée ; le backend refuse tout `start`
+         ou `confirm` sans mot de passe, y compris au premier enrôlement. #}
       {{ ui::note(t_totp_active_note) }}
       <form class="form" hx-post="/api/me/totp" hx-swap="none">
         {{ ui::hidden("action", "remove") }}
@@ -66,8 +66,12 @@
       </form>
     {% else %}
       {{ ui::pill(t_totp_disabled, "", false) }}
+      {# Le démarrage exige lui aussi le mot de passe courant (preuve
+         anti-session-volée, comme la confirmation et la suppression) : le
+         backend refuse un `start` sans mot de passe. #}
       <form class="form" id="totp-start" hx-post="/api/me/totp" hx-target="#totp-slot" hx-swap="innerHTML">
         {{ ui::hidden("action", "start") }}
+        {{ ui::field(t_current_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
         {{ ui::submit(t_totp_setup, false) }}
       </form>
     {% endif %}

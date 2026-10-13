@@ -3,9 +3,9 @@
 //! Offline rescue CLI (`wg-ez cli ...`): direct SQLite access, usable
 //! when the web server is broken.
 //!
-//! - `db:admin:reset` sets a new 12+ char password for admin id 1 and
-//!   clears `totpKey`/`totpVerified` (v15 prompts when `--password` is
-//!   absent; here one stdin line is read instead).
+//! - `db:admin:reset` sets a new 12+ char password for admin id 1, clears
+//!   `totpKey`/`totpVerified` and revokes every existing session (v15 prompts
+//!   when `--password` is absent; here one stdin line is read instead).
 //! - `clients:list` prints id, name, public key and state.
 //! - `clients:qr <id>` prints the client `.conf` as a terminal
 //!   QR (half-block renderer, maison). The payload reuses the canonical
@@ -161,8 +161,9 @@ fn read_password_stdin() -> Result<String, CliError> {
     Ok(line.trim_end_matches(['\r', '\n']).to_string())
 }
 
-/// Reset admin id 1: new password (12+ chars) + clear `totpKey` /
-/// `totpVerified`. Errors when id 1 is missing (no silent creation).
+/// Reset admin id 1: new password (12+ chars), clear `totpKey` /
+/// `totpVerified`, and revoke every existing session. Errors when id 1 is
+/// missing (no silent creation).
 pub fn reset_admin(
     conn: &rusqlite::Connection,
     username: Option<String>,
@@ -189,10 +190,15 @@ pub fn reset_admin(
             rusqlite::params![u, hash],
         )?;
         crate::store::user::set_totp(conn, 1, None, false)?;
+        // Parité avec le changement de mot de passe web : un token volé avant
+        // le reset ne doit pas survivre à la rotation.
+        crate::store::session::delete_for_user(conn, 1)?;
         Ok(format!("Successfully updated admin user 1 ({u})\n"))
     } else {
         crate::store::user::set_password_hash(conn, 1, Some(hash.as_str()))?;
         crate::store::user::set_totp(conn, 1, None, false)?;
+        // Parité avec le changement de mot de passe web (cf. branche ci-dessus).
+        crate::store::session::delete_for_user(conn, 1)?;
         Ok(format!(
             "Successfully updated admin user 1 ({})\n",
             current.username
@@ -403,6 +409,30 @@ mod tests {
         assert!(user.totp_key.is_none());
         assert!(!user.totp_verified);
         assert!(reset_admin(&conn, None, Some("short".to_string())).is_err());
+    }
+
+    #[test]
+    fn reset_revokes_existing_sessions_but_keeps_other_users() {
+        let conn = cli_memdb();
+        // Une session admin survivante + une session d'un autre user.
+        crate::store::user::create(&conn, "bob", Some("old-hash"), "Bob").expect("user 2");
+        crate::store::session::create(&conn, "hash-admin", 1, "2999-01-01T00:00:00Z")
+            .expect("session admin");
+        crate::store::session::create(&conn, "hash-bob", 2, "2999-01-01T00:00:00Z")
+            .expect("session bob");
+        reset_admin(&conn, None, Some("a-brand-new-password".to_string())).expect("reset");
+        let admin_left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE userId = 1", [], |r| {
+                r.get(0)
+            })
+            .expect("compte admin");
+        assert_eq!(admin_left, 0, "aucune session admin ne doit survivre");
+        let bob_left: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE userId = 2", [], |r| {
+                r.get(0)
+            })
+            .expect("compte bob");
+        assert_eq!(bob_left, 1, "les autres users ne sont pas révoqués");
     }
 
     #[test]

@@ -203,10 +203,10 @@ impl SqliteBackend {
     pub(crate) async fn totp_setup_start_inner(
         &self,
         user_id: i64,
-        password: Option<&str>,
+        password: &str,
     ) -> Result<TotpSetup, WebError> {
-        let password = password.map(str::to_string);
-        self.with_db(move |conn| totp_start(&conn, user_id, password.as_deref()))
+        let password = password.to_string();
+        self.with_db(move |conn| totp_start(&conn, user_id, &password))
             .await
     }
 
@@ -214,10 +214,18 @@ impl SqliteBackend {
         &self,
         user_id: i64,
         code: &str,
+        password: &str,
     ) -> Result<(), WebError> {
         let code = code.to_string();
+        let password = password.to_string();
         self.with_db(move |conn| {
-            confirm_totp(&conn, user_id, &code, crate::auth::totp::now_unix_secs())
+            confirm_totp(
+                &conn,
+                user_id,
+                &code,
+                crate::auth::totp::now_unix_secs(),
+                &password,
+            )
         })
         .await
     }
@@ -262,23 +270,20 @@ fn require_current_password(
 
 /// Start (or restart) TOTP enrollment.
 ///
-/// I2 guard: when a 2FA is already **active** (`totp_key` set *and*
-/// `verified`), the caller must prove the current password — exactly like
-/// [`SqliteBackend::totp_remove_inner`]. A stolen session cookie alone can
-/// therefore never disable nor overwrite an active 2FA. When there is no
-/// verified secret (first enrollment, or a secret generated but not yet
-/// confirmed), the session alone is enough and the pending secret may be
-/// regenerated freely. The password is only ever compared, never logged nor
-/// echoed back.
+/// La preuve du mot de passe courant est TOUJOURS exigée — y compris pour le
+/// premier enrôlement — exactement comme [`SqliteBackend::totp_remove_inner`]
+/// et les changements de mot de passe / nom. Sans cela, un cookie de session
+/// volé suffirait à enrôler une 2FA connue de l'attaquant, qui survivrait à
+/// l'expiration de la session et à la rotation du mot de passe (les sessions
+/// sont révoquées, pas la 2FA). Le mot de passe est seulement comparé, jamais
+/// journalisé ni renvoyé.
 fn totp_start(
     conn: &rusqlite::Connection,
     user_id: i64,
-    password: Option<&str>,
+    password: &str,
 ) -> Result<TotpSetup, WebError> {
     let user = user_row(conn, user_id)?;
-    if user.totp_key.is_some() && user.totp_verified {
-        require_current_password(&user, password.unwrap_or_default())?;
-    }
+    require_current_password(&user, password)?;
     let secret =
         crate::auth::totp::generate_secret().map_err(|e| WebError::internal(e.to_string()))?;
     let secret_b32 = crate::auth::totp::base32_encode(&secret);
@@ -344,14 +349,18 @@ fn consume_totp_code(
 
 /// Confirm TOTP enrollment: verify `code` against the pending secret, enable
 /// 2FA, and persist the matched step so the confirmation code cannot be
-/// replayed at login inside its `±1` window.
+/// replayed at login inside its `±1` window. The current password is required
+/// (same step-up proof as `start`): confirming an attacker-known secret must
+/// not be possible with a stolen session alone.
 fn confirm_totp(
     conn: &rusqlite::Connection,
     user_id: i64,
     code: &str,
     now: u64,
+    password: &str,
 ) -> Result<(), WebError> {
     let user = user_row(conn, user_id)?;
+    require_current_password(&user, password)?;
     let Some(key) = user.totp_key else {
         return Err(WebError::bad_request("totp not started"));
     };
@@ -439,6 +448,16 @@ mod tests {
         id
     }
 
+    /// Comme `seeded_totp_user`, mais avec un mot de passe connu (la
+    /// confirmation exige désormais la preuve du mot de passe courant).
+    fn seeded_password_totp_user(conn: &rusqlite::Connection, verified: bool) -> i64 {
+        let hash = crate::auth::password::hash_password_blocking(PASSWORD).expect("hash argon2id");
+        let id = crate::store::user::create(conn, "totp-user", Some(&hash), "Totp")
+            .expect("insert user");
+        crate::store::user::set_totp(conn, id, Some(RFC_SECRET_B32), verified).expect("seed totp");
+        id
+    }
+
     /// The 6-digit code for an explicit step of [`RFC_SECRET_B32`].
     fn code_for(counter: u64) -> String {
         let secret = crate::auth::totp::base32_decode(RFC_SECRET_B32).expect("decode");
@@ -516,10 +535,10 @@ mod tests {
     #[test]
     fn confirm_totp_consumes_code_before_login() {
         let conn = memdb();
-        let id = seeded_totp_user(&conn, false);
+        let id = seeded_password_totp_user(&conn, false);
         let code = code_for(1);
 
-        confirm_totp(&conn, id, &code, 59).expect("confirm");
+        confirm_totp(&conn, id, &code, 59, PASSWORD).expect("confirm");
         let user = row(&conn, id);
         assert!(user.totp_verified, "2FA is now active");
         assert_eq!(user.totp_last_counter, Some(1));
@@ -537,7 +556,7 @@ mod tests {
         let conn = memdb();
         let id = seeded_user(&conn, true);
 
-        let err = totp_start(&conn, id, None).expect_err("start must be refused");
+        let err = totp_start(&conn, id, "").expect_err("start must be refused");
         assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
         assert_eq!(err.seclog, Some("password"), "must log a password failure");
 
@@ -553,7 +572,7 @@ mod tests {
         let conn = memdb();
         let id = seeded_user(&conn, true);
 
-        let err = totp_start(&conn, id, Some("definitely-wrong")).expect_err("must be refused");
+        let err = totp_start(&conn, id, "definitely-wrong").expect_err("must be refused");
         assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
         assert_eq!(err.seclog, Some("password"));
 
@@ -570,7 +589,7 @@ mod tests {
         let conn = memdb();
         let id = seeded_user(&conn, true);
 
-        let setup = totp_start(&conn, id, Some(PASSWORD)).expect("correct password accepted");
+        let setup = totp_start(&conn, id, PASSWORD).expect("correct password accepted");
         assert!(!setup.secret.is_empty());
 
         let user = row(&conn, id);
@@ -579,20 +598,47 @@ mod tests {
         assert!(!user.totp_verified, "the new secret must start unverified");
     }
 
-    /// First enrollment (no secret) and a pending unverified secret need no
-    /// password and may be regenerated freely.
+    /// Premier enrôlement : la preuve du mot de passe courant est exigée comme
+    /// pour toute porte sensible. Sans elle (session volée), aucun secret
+    /// n'est persisté ; avec elle, le secret est émis et régénérable.
     #[test]
-    fn start_without_verified_2fa_needs_no_password_and_regenerates() {
+    fn start_without_password_is_refused_even_for_first_enrollment() {
         let conn = memdb();
         let id = seeded_user(&conn, false);
 
-        let first = totp_start(&conn, id, None).expect("first start");
+        let err = totp_start(&conn, id, "").expect_err("first start without password");
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(err.seclog, Some("password"), "must log a password failure");
+        assert!(
+            row(&conn, id).totp_key.is_none(),
+            "no secret must be persisted"
+        );
+
+        let first = totp_start(&conn, id, PASSWORD).expect("first start with password");
         assert!(!first.secret.is_empty());
         assert!(!row(&conn, id).totp_verified);
 
-        let second = totp_start(&conn, id, None).expect("pending secret regeneration");
+        let second = totp_start(&conn, id, PASSWORD).expect("pending secret regeneration");
         assert_ne!(first.secret, second.secret, "pending secret is regenerated");
         assert!(!row(&conn, id).totp_verified);
+    }
+
+    /// La confirmation exige elle aussi le mot de passe courant : un code
+    /// valide présenté avec une session volée (sans mot de passe) n'active
+    /// pas la 2FA, le secret reste en attente.
+    #[test]
+    fn confirm_totp_without_password_is_refused_and_keeps_pending() {
+        let conn = memdb();
+        let id = seeded_password_totp_user(&conn, false);
+        let code = code_for(1);
+
+        let err = confirm_totp(&conn, id, &code, 59, "mauvais-mot-de-passe")
+            .expect_err("confirm without password");
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(err.seclog, Some("password"));
+        let user = row(&conn, id);
+        assert!(!user.totp_verified, "2FA must stay pending");
+        assert_eq!(user.totp_last_counter, None, "no step consumed");
     }
 
     /// Real `SqliteBackend` on a fresh temp DB: password login persists an

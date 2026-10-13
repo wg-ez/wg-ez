@@ -233,8 +233,8 @@ impl Backend for SqliteBackend {
         fn update_me(user_id: i64, name: &str) -> Result<UserView, WebError> => update_me_inner;
         fn change_username(user_id: i64, current: &str, username: &str) -> Result<UserView, WebError> => change_username_inner;
         fn change_password(user_id: i64, current: &str, next: &str) -> Result<(), WebError> => change_password_inner;
-        fn totp_setup_start(user_id: i64, password: Option<&str>) -> Result<TotpSetup, WebError> => totp_setup_start_inner;
-        fn totp_setup_confirm(user_id: i64, code: &str) -> Result<(), WebError> => totp_setup_confirm_inner;
+        fn totp_setup_start(user_id: i64, password: &str) -> Result<TotpSetup, WebError> => totp_setup_start_inner;
+        fn totp_setup_confirm(user_id: i64, code: &str, password: &str) -> Result<(), WebError> => totp_setup_confirm_inner;
         fn totp_remove(user_id: i64, password: &str) -> Result<(), WebError> => totp_remove_inner;
 
         // -- clients -------------------------------------------------------

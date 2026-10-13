@@ -269,16 +269,13 @@ impl Backend for TestBackend {
     async fn change_password(&self, _u: i64, _c: &str, _n: &str) -> Result<(), WebError> {
         Ok(())
     }
-    async fn totp_setup_start(
-        &self,
-        _u: i64,
-        password: Option<&str>,
-    ) -> Result<TotpSetup, WebError> {
-        // Mirrors the I2 guard: starting/overwriting an already-active 2FA
-        // needs the current password. The router test proves the handler
-        // forwards the body `password` instead of re-implementing the check.
+    async fn totp_setup_start(&self, _u: i64, password: &str) -> Result<TotpSetup, WebError> {
+        // Miroir de la garde de production : le démarrage exige toujours le
+        // mot de passe courant (y compris au premier enrôlement). Le test
+        // routeur prouve que le handler transmet le `password` du corps au
+        // lieu de réimplémenter le contrôle.
         match password {
-            Some("correct") => Ok(TotpSetup {
+            "correct" => Ok(TotpSetup {
                 secret: "SECRET".into(),
                 otpauth_url: "otpauth://x".into(),
                 qr_svg: "<svg></svg>".into(),
@@ -286,7 +283,12 @@ impl Backend for TestBackend {
             _ => Err(WebError::unauthorized("password is wrong").with_seclog("password")),
         }
     }
-    async fn totp_setup_confirm(&self, _u: i64, _c: &str) -> Result<(), WebError> {
+    async fn totp_setup_confirm(&self, _u: i64, _c: &str, password: &str) -> Result<(), WebError> {
+        // Miroir de la garde de production : la confirmation exige elle aussi
+        // le mot de passe courant.
+        if password != "correct" {
+            return Err(WebError::unauthorized("password is wrong").with_seclog("password"));
+        }
         Ok(())
     }
     async fn totp_remove(&self, _u: i64, _p: &str) -> Result<(), WebError> {
@@ -1462,6 +1464,38 @@ async fn client_detail_renders_shared_ui_macros() {
     assert!(body.contains("Danger zone"), "{body}");
 }
 
+/// La fiche UI `/clients/{id}` ne doit pas fuir l'existence : un CLIENT sur
+/// l'id d'un autre obtient le même 404 qu'un id inconnu (parité avec
+/// `load_client` côté API), tandis que son propre client et un ADMIN
+/// obtiennent 200. Prouvé via le vrai routeur.
+#[tokio::test]
+async fn ui_client_detail_foreign_is_404_not_403() {
+    let app = build_router(finished_state());
+
+    // CLIENT (user 2) sur le client id 1 (user 1) : 404, pas 403 ...
+    let (s, _, body) = req(app.clone(), "GET", "/clients/1", Some("wg-ez=client")).await;
+    assert_eq!(
+        s,
+        StatusCode::NOT_FOUND,
+        "CLIENT étranger /clients/1 : {body}"
+    );
+    // ... identique à un id inconnu (pas d'oracle).
+    let (s_unknown, _, body_unknown) =
+        req(app.clone(), "GET", "/clients/999999", Some("wg-ez=client")).await;
+    assert_eq!(s_unknown, StatusCode::NOT_FOUND);
+    assert_eq!(
+        body, body_unknown,
+        "les deux 404 doivent être indiscernables"
+    );
+
+    // Son propre client reste visible ...
+    let (s, _, _) = req(app.clone(), "GET", "/clients/2", Some("wg-ez=client")).await;
+    assert_eq!(s, StatusCode::OK, "propre client");
+    // ... comme pour un ADMIN sur n'importe quel client.
+    let (s, _, _) = req(app, "GET", "/clients/1", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK, "ADMIN");
+}
+
 /// login/2FA : titres-cartes passes par `ui::phead_h1` (lot 10) et champs
 /// `ui::field`. Depuis le durcissement FAIBLE, la 2FA ne reflechit plus aucun
 /// id `pending` (ni champ cache, ni URL) : il vit uniquement dans le cookie
@@ -1588,10 +1622,11 @@ async fn change_username_requires_password_and_hides_conflicts() {
     }
 }
 
-/// I2: `POST /api/me/totp {action:"start"}` must forward the body `password`
-/// to the backend, where the active-2FA guard lives (shared by the JSON API
-/// and the UI). Without the password the backend refuses (401 + seclog
-/// `password`); with the correct one the enrollment starts (200).
+/// `POST /api/me/totp {action:"start"}` doit transmettre le `password` du
+/// corps au backend, où vit la garde mot-de-passe-courant (partagée par l'API
+/// JSON et l'UI, exigée y compris au premier enrôlement). Sans mot de passe le
+/// backend refuse (401 + seclog `password`) ; avec le bon l'enrôlement démarre
+/// (200).
 #[tokio::test]
 async fn totp_start_forwards_password_for_active_2fa_guard() {
     let app = build_router(finished_state());
@@ -1613,6 +1648,39 @@ async fn totp_start_forwards_password_for_active_2fa_guard() {
         "/api/me/totp",
         Some("wg-ez=valid"),
         r#"{"action":"start","password":"correct"}"#,
+    )
+    .await;
+    assert_eq!(
+        s2,
+        StatusCode::OK,
+        "correct password must reach the backend"
+    );
+}
+
+/// `POST /api/me/totp {action:"confirm"}` exige lui aussi le mot de passe
+/// courant : sans lui le backend refuse (401), avec le bon la confirmation
+/// passe (200). Prouvé via le vrai routeur.
+#[tokio::test]
+async fn totp_confirm_requires_current_password() {
+    let app = build_router(finished_state());
+    let (s, _, _) = post_json(
+        app.clone(),
+        "/api/me/totp",
+        Some("wg-ez=valid"),
+        r#"{"action":"confirm","code":"123456"}"#,
+    )
+    .await;
+    assert_eq!(
+        s,
+        StatusCode::UNAUTHORIZED,
+        "confirm without password must be refused"
+    );
+
+    let (s2, _, _) = post_json(
+        app,
+        "/api/me/totp",
+        Some("wg-ez=valid"),
+        r#"{"action":"confirm","code":"123456","password":"correct"}"#,
     )
     .await;
     assert_eq!(
@@ -2046,6 +2114,43 @@ async fn client_dns_patch_is_validated_by_the_router() {
     )
     .await;
     assert_eq!(s, StatusCode::BAD_REQUEST, "wrong family must be rejected");
+}
+
+/// Un `firewallIpsV4`/`V6` qui n'est pas une IP/CIDR (nom, `*`, préfixe
+/// invalide) est refusé 400 à l'écriture : la destination part verbatim en
+/// `-d` iptables et une ligne empoisonnée ferait avorter tout l'apply avant
+/// le `DROP` final. Les formes valides (IP, CIDR, port, proto, `[]`) restent
+/// acceptées. Prouvé via le vrai routeur (le backend de test rejoue
+/// `parse_client_update`).
+#[tokio::test]
+async fn client_firewall_patch_rejects_non_ip_destinations() {
+    let app = build_router(finished_state());
+    for bad in [
+        "evil",
+        "*",
+        "10.0.0.0/999",
+        "999.999.999.999",
+        "example.com",
+    ] {
+        for key in ["firewallIpsV4", "firewallIpsV6"] {
+            let body = format!(r#"{{"{key}":["{bad}"]}}"#);
+            let (s, _, _) =
+                post_json(app.clone(), "/api/client/1", Some("wg-ez=valid"), &body).await;
+            assert_eq!(s, StatusCode::BAD_REQUEST, "{key}={bad} doit être refusé");
+        }
+    }
+
+    for good in [
+        r#"{"firewallIpsV4":["10.0.0.1"]}"#,
+        r#"{"firewallIpsV4":["10.0.0.0/24"]}"#,
+        r#"{"firewallIpsV4":["10.0.0.1:51820"]}"#,
+        r#"{"firewallIpsV4":["10.0.0.0/24:443/udp"]}"#,
+        r#"{"firewallIpsV6":["::/0"]}"#,
+        r#"{"firewallIpsV4":[]}"#,
+    ] {
+        let (s, _, body) = post_json(app.clone(), "/api/client/1", Some("wg-ez=valid"), good).await;
+        assert_eq!(s, StatusCode::OK, "{good} accepté : {body}");
+    }
 }
 
 /// Non-regression du bug live "PATCH JSON partiel sans `enabled`" : un

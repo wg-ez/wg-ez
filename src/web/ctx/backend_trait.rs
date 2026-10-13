@@ -100,19 +100,23 @@ pub trait Backend: Send + Sync + 'static {
         current: &str,
         next: &str,
     ) -> impl Future<Output = Result<(), WebError>> + Send;
-    /// Start (or restart) TOTP enrollment. When a verified 2FA already
-    /// exists, `password` MUST be checked against the current password: a
-    /// stolen session cookie alone can never disable nor overwrite it (I2).
-    /// Ignored for a first enrollment or an unverified pending secret.
+    /// Start (or restart) TOTP enrollment. `password` MUST always be the
+    /// current password (step-up proof, exactly like the password/username
+    /// changes and the 2FA removal): a stolen session cookie alone can never
+    /// enroll an attacker-known 2FA that would survive session expiry and
+    /// password rotation.
     fn totp_setup_start(
         &self,
         user_id: i64,
-        password: Option<&str>,
+        password: &str,
     ) -> impl Future<Output = Result<TotpSetup, WebError>> + Send;
+    /// Confirm TOTP enrollment. Needs the 6-digit `code` AND the current
+    /// `password` (same step-up proof as `start`).
     fn totp_setup_confirm(
         &self,
         user_id: i64,
         code: &str,
+        password: &str,
     ) -> impl Future<Output = Result<(), WebError>> + Send;
     fn totp_remove(
         &self,
