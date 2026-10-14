@@ -1548,6 +1548,63 @@ async fn setup_pages_render_shared_macros() {
     );
 }
 
+/// R4 : le socle `SetupCommon` garde les 3 etapes localisees FR/EN (rail,
+/// titre, nav) et le gating `setupStep == 0` redirige vers `/login` (303)
+/// au lieu de rendre le wizard.
+#[tokio::test]
+async fn setup_pages_localized_and_gated() {
+    let app = build_router(test_state());
+    // FR : titres, CTA, nav et rail traduits sur chaque etape.
+    let (s, _, fr1) = req(app.clone(), "GET", "/setup/1?lang=fr", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(fr1.contains("Bienvenue sur wg-ez"), "{fr1}");
+    assert!(fr1.contains("Suivant"), "{fr1}");
+    let (s, _, fr2) = req(app.clone(), "GET", "/setup/2?lang=fr", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(fr2.contains("Créer le compte admin"), "{fr2}");
+    assert!(
+        fr2.contains("Créer l&#39;admin") || fr2.contains("Créer l'admin"),
+        "{fr2}"
+    );
+    assert!(fr2.contains("Retour"), "{fr2}");
+    assert!(fr2.contains("Admin"), "{fr2}");
+    let (s, _, fr3) = req(app.clone(), "GET", "/setup/3?lang=fr", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(fr3.contains("Endpoint public"), "{fr3}");
+    assert!(fr3.contains("Terminer le setup"), "{fr3}");
+    assert!(fr3.contains("Retour"), "{fr3}");
+    // EN : memes etapes, autres libelles, meme squelette.
+    let (s, _, en1) = req(app.clone(), "GET", "/setup/1?lang=en", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(en1.contains("Welcome to wg-ez"), "{en1}");
+    assert!(en1.contains("Next"), "{en1}");
+    assert!(en1.contains("Welcome"), "{en1}");
+    let (s, _, en2) = req(app.clone(), "GET", "/setup/2?lang=en", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(en2.contains("Create the admin account"), "{en2}");
+    assert!(en2.contains("Create admin"), "{en2}");
+    assert!(en2.contains("Back"), "{en2}");
+    let (s, _, en3) = req(app.clone(), "GET", "/setup/3?lang=en", None).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(en3.contains("Public endpoint"), "{en3}");
+    assert!(en3.contains("Finish setup"), "{en3}");
+    assert!(en3.contains(r#"name="host""#), "{en3}");
+    assert!(en3.contains(r#"name="port""#), "{en3}");
+    assert!(en3.contains(r#"href="/setup/2""#), "{en3}");
+    // Gating : setup termine -> 303 /login sur les 3 etapes.
+    let done = build_router(finished_state());
+    for step in ["/setup/1", "/setup/2", "/setup/3"] {
+        let (s, h, body) = req(done.clone(), "GET", step, None).await;
+        assert_eq!(s, StatusCode::SEE_OTHER, "{step}");
+        assert_eq!(
+            h.get("location").map(|v| v.to_str().unwrap()),
+            Some("/login"),
+            "{step}"
+        );
+        assert!(body.is_empty(), "{step}");
+    }
+}
+
 /// `/me` : bandeau `ui::pill`, panneaux `ui::phead`, lecture-seule `ui::kv1`,
 /// champs `ui::field`, envoi `ui::submit`, queue `ui::tail`.
 #[tokio::test]

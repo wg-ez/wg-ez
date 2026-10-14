@@ -14,6 +14,10 @@
      | "bad" (`--danger`). `dot` ajoute `<i class="dot">` pour les bandeaux
      qui l'exigent. `pill2` joint deux affichages par une espace (`0 Clients`),
      les gabarits ne sachant pas concatener.
+    - `hero(title)` : bandeau d'identite de page (`.pad` >
+      `h1.display.display--h3` + `.row` de `.pill`), definition UNIQUE des 4
+      pages (`/`, `/admin`, `/clients/:id`, `/me`). S'invoque en `{% call %>`
+      (le corps = les appels `pill`).
    - `toolbar(...)` : barre de recherche + tri de `/` (`form.toolbar` +
      `details.menu--sort`). Les options passent par `sort_item` (lien `?sort=`,
      `is-on` + `aria-current` sur l'active, `filter`/`lang` conserves).
@@ -37,6 +41,14 @@
      (`danger` = `btn--danger`). Pages/panneaux uniquement, `.acts` reste le
      systeme des cartes. `login_2fa` garde son `.actions` inline (2e action =
      bouton fantome `hx-post /api/auth/cancel`).
+    - `mutate(label, tone, del, url, confirm)` : bouton mutateur HORS
+     formulaire (`button.btn` + `hx-post`/`hx-delete` + `hx-swap="none"` +
+     `hx-confirm` optionnel). `tone` = "" (neutre) | "ghost" (`btn--ghost`) |
+     "danger" (`btn--danger`), meme vocabulaire que `pill`. `del` vrai pose
+     `hx-delete`, faux `hx-post` (meme convention booleenne que
+     `submit(label, danger)`). `confirm` vide = attribut omis. `url` est
+     l'URL complete, construite au site d'appel. Ne couvre ni `submit`
+     (soumission) ni `a.btn--ghost` de navigation (action vs lien).
    - `note(text)` : footnote de panneau (`p.note`). Prend du TEXTE, pas du
      balisage : une note a lien conditionnel reste inline. A ne pas confondre
      avec `lead` (chapeau d'intro avant les champs).
@@ -44,6 +56,15 @@
      de progression du setup (`ol.wizard`). `idx == current` -> `is-on` +
      `aria-current="step"`, `idx < current` -> `is-done`. `current` est un
      indice positionnel, non traduisible.
+   - `setup_shell(s1, s2, s3, current, title, aside)` : squelette des 3 etapes
+     du setup (`.page > .pad > .narrow--wide` + `wizard` + `.stack >
+     section.panel` + `phead_h1`). S'invoque en `{% call %}`, le corps portant
+     le contenu specifique (lead+lien, form admin, form host/port).
+   - `auth_card(title, aside)` : coquille de la carte d'authentification
+     (`.narrow > section.panel.panel--card > phead_h1` + corps). S'invoque en
+     `{% call %}`, le corps portant bandeau, `form.form` et `note`. NE
+     FUSIONNE PAS les formulaires : chaque page garde son `hx-post` et son
+     preambule (hero du login) reste HORS de la carte.
    - `totp_box(...)` : bloc `div.totp#totp-box` entier (QR + secret +
      formulaire de confirmation). Une seule definition du contrat d'`id` :
      `#totp-start` est masque par `.panel:has(#totp-box) #totp-start` des que
@@ -60,9 +81,10 @@
      `kv1` rend une ligne depuis deux chaines (profil `/me`). `kv` EST le
      primitif lecture-seule (un `input[readonly]` ressemble a un champ editable
      sans l'etre).
-   - `oops(code, message, cta_label)` : page d'erreur entiere partagee par
-     `error_404`/`error_500`. `.oops` centre ses enfants, d'ou un `.actions`
-     centre (divergence de conteneur, pas de composant).
+   - `oops(code, message, cta_label)` : page d'erreur entiere, unique
+     consommateur `error.html` (struct Rust `ErrorPage`, 404 et 500 confondus).
+     `.oops` centre ses enfants, d'ou un `.actions` centre (divergence de
+     conteneur, pas de composant).
 
    Non-unifications volontaires :
    - `.acts > *` (cellules d'une barre segmentee, `z-index:2` au-dessus du
@@ -70,8 +92,9 @@
      la barre et l'overlay de carte cliquable.
    - `dl.kv--flush` (carte portant deja le cadre) vs `dl.kv` (panneau) :
      distinction contextuelle, portee par `flush`.
-   - `login_2fa.html` vs `login.html` : pas de macro commune (hero/bandeau
-     cote login, formulaires divergents).
+   - `login_2fa.html` vs `login.html` : la COQUILLE de carte est partagee
+     (`auth_card`), seuls les formulaires restent distincts (`hx-post`
+     differents, 2e action fantome cote 2FA, hero hors carte cote login).
    - bouton `btn--ghost` mutateur (`hx-post`/`hx-delete`) vs `a.btn--ghost` de
      navigation : action vs lien, jamais interchangeables.
    - `fillers`/`tail` restent de VRAIES cellules : un `min-height`/bordure de
@@ -112,6 +135,19 @@
    (`0 Clients`, `version 1.2.3`). Meme `tone`/`dot` que `pill`. #}
 {% macro pill2(a, b, tone, dot) -%}
 <span class="pill{% if tone == "live" %} pill--live{% else if tone == "warn" %} pill--warn{% else if tone == "bad" %} pill--bad{% endif %}">{% if dot %}<i class="dot{% if tone == "live" %} dot--live{% endif %}"></i>{% endif %}{{ a }} {{ b }}</span>
+{%- endmacro %}
+
+{# Bandeau d'identite de page (`.pad` > `h1.display.display--h3` + `.row` de
+   `.pill`) : definition UNIQUE des 4 pages (`/`, `/admin`, `/clients/:id`,
+   `/me`). S'invoque en `{% call %}`, le corps portant les appels `pill`
+   (exige par `caller()`, donc jamais en `{{ }}`). #}
+{% macro hero(title) -%}
+<div class="pad">
+  <h1 class="display display--h3">{{ title }}</h1>
+  <div class="row">
+    {{ caller() }}
+  </div>
+</div>
 {%- endmacro %}
 
 {# Fragment `hx-vals` lang partage par `toolbar`, `#grid` et `#me-page`
@@ -241,6 +277,21 @@ hx-vals='{"lang": "{{ lang }}"}'
 </div>
 {%- endmacro %}
 
+{# Coquille de la carte d'authentification (`login`/2FA) : `.narrow` (26 rem,
+   carte seule) > `section.panel.panel--card` > `phead_h1` + corps. S'invoque
+   en `{% call %}`, le corps portant le bandeau eventuel, le `form.form` et la
+   `note`. NE FUSIONNE PAS les formulaires : chaque page garde son `hx-post`
+   (`/api/auth/password` vs `/api/auth/verify-2fa`) ; le preambule du login
+   (`hero__mark`) reste HORS de la carte. #}
+{% macro auth_card(title, aside = "") -%}
+<div class="narrow">
+  <section class="panel panel--card">
+    {{ phead_h1(title, aside) }}
+    {{ caller() }}
+  </section>
+</div>
+{%- endmacro %}
+
 {# UN item du rail de progression du setup (`li.wizard__i`) : numero mono `NN`
    + libelle. `idx == current` -> `is-on` + `aria-current="step"` (seule
    cellule `--app`), `idx < current` -> `is-done` (`--ok`). Interne a
@@ -263,6 +314,29 @@ hx-vals='{"lang": "{{ lang }}"}'
 </ol>
 {%- endmacro %}
 
+{# Squelette des 3 etapes du setup (`.page > .pad > .narrow--wide` + `wizard`
+   + `.stack > section.panel` + `phead_h1`) : definition UNIQUE du wrapper,
+   les etapes ne portant que leur corps specifique. S'invoque en `{% call %}`
+   (le corps = lead+lien, form admin ou form host/port, exige par `caller()`,
+   donc jamais en `{{ }}`). `current` = etape active 1..3 (indice POSITIONNEL,
+   non traduisible, meme statut que dans `wizard`) ; `title`/`aside` et
+   `s1..s3` sont des libelles resolus par le Rust. #}
+{% macro setup_shell(s1, s2, s3, current, title, aside) -%}
+<div class="page">
+  <div class="pad">
+    <div class="narrow--wide">
+      {{ wizard(s1, s2, s3, current) }}
+      <div class="stack">
+        <section class="panel">
+          {{ phead_h1(title, aside) }}
+          {{ caller() }}
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+{%- endmacro %}
+
 {# UN fait cle/valeur (`dl.kv`, cadre sauf `flush`) : pendant mono-ligne de
    `kv()` pour les contextes sans `Vec<Kv>` (profil `/me`). Remplace le
    `input[readonly]` du profil : `kv` EST le primitif lecture-seule, un champ
@@ -277,14 +351,23 @@ hx-vals='{"lang": "{{ lang }}"}'
 </dl>
 {%- endmacro %}
 
-{# Ligne de champ (`label.flabel > span.hud + input.field`). Chaine vide =
-   attribut omis ; `readonly`/`required`/`autofocus` booleens (jamais les deux premiers ensemble).
-   Les attributs figes (`type`, `name`, `pattern`, `action`) sont le contrat
-   avec l'API, comme `name`/`type`/`min`/`max` de `adm::field`. #}
-{% macro field(label, itype, name, value, autocomplete, minlength, pattern, inputmode, maxlength, readonly, required, placeholder = "", min = "", max = "", disabled = false, autofocus = false) -%}
+{# Ligne de champ (`label.flabel > span.hud + input.field`, ou
+   `textarea.field--area` si `multiline`). Seuls `label`/`itype`/`name`/
+   `value` sont positionnels obligatoires ; tout le reste a une valeur par
+   defaut et se passe en NOMME (`maxlength = "64"`, `min = "1"`,
+   `disabled = ...`), jamais en `""` positionnels. Chaine vide = attribut
+   omis ; `readonly`/`required`/`autofocus`/`disabled`/`multiline` booleens.
+   Les attributs figes (`type`, `name`, `pattern`, `action`, `rows="2"`) sont
+   le contrat avec l'API, comme `name`/`type`/`min`/`max` de `adm::field`
+   (qui y delegue par kind). #}
+{% macro field(label, itype, name, value, autocomplete = "", minlength = "", pattern = "", inputmode = "", maxlength = "", readonly = false, required = false, placeholder = "", min = "", max = "", disabled = false, autofocus = false, multiline = false) -%}
 <label class="flabel">
   <span class="hud">{{ label }}</span>
+  {% if multiline -%}
+  <textarea class="field field--area" name="{{ name }}" rows="2"{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if disabled %} disabled{% endif %}>{{ value }}</textarea>
+  {%- else -%}
   <input class="field" type="{{ itype }}"{% if !name.is_empty() %} name="{{ name }}"{% endif %}{% if !value.is_empty() %} value="{{ value }}"{% endif %}{% if !autocomplete.is_empty() %} autocomplete="{{ autocomplete }}"{% endif %}{% if !minlength.is_empty() %} minlength="{{ minlength }}"{% endif %}{% if !pattern.is_empty() %} pattern="{{ pattern }}"{% endif %}{% if !inputmode.is_empty() %} inputmode="{{ inputmode }}"{% endif %}{% if !maxlength.is_empty() %} maxlength="{{ maxlength }}"{% endif %}{% if !placeholder.is_empty() %} placeholder="{{ placeholder }}"{% endif %}{% if !min.is_empty() %} min="{{ min }}"{% endif %}{% if !max.is_empty() %} max="{{ max }}"{% endif %}{% if readonly %} readonly{% endif %}{% if required %} required{% endif %}{% if disabled %} disabled{% endif %}{% if autofocus %} autofocus{% endif %} />
+  {%- endif %}
 </label>
 {%- endmacro %}
 
@@ -295,6 +378,17 @@ hx-vals='{"lang": "{{ lang }}"}'
 <div class="actions">
   <button class="btn{% if danger %} btn--danger{% endif %}" type="submit">{{ label }}</button>
 </div>
+{%- endmacro %}
+
+{# Bouton mutateur hors formulaire (`button.btn[type=button]` + verbe htmx +
+   `hx-swap="none"` + `hx-confirm` optionnel) : PSK (generer/retirer) et zone
+   danger (supprimer/regenerer) de la fiche client. `tone` = "" (neutre) |
+   "ghost" (`btn--ghost`) | "danger" (`btn--danger`) ; `del` vrai pose
+   `hx-delete`, faux `hx-post` ; `confirm` vide = attribut omis (generation
+   PSK, sans confirmation). `url` est l'URL complete. Attributs dans l'ordre
+   historique : `class`, `type`, verbe htmx, `hx-swap`, `hx-confirm`. #}
+{% macro mutate(label, tone, del, url, confirm = "") -%}
+<button class="btn{% if tone == "ghost" %} btn--ghost{% else if tone == "danger" %} btn--danger{% endif %}" type="button" {% if del %}hx-delete="{{ url }}"{% else %}hx-post="{{ url }}"{% endif %} hx-swap="none"{% if !confirm.is_empty() %} hx-confirm="{{ confirm }}"{% endif %}>{{ label }}</button>
 {%- endmacro %}
 
 {# Champ cache (`<input type="hidden">`, aucune classe). `name` et `value`
@@ -341,9 +435,9 @@ hx-vals='{"lang": "{{ lang }}"}'
 
 {# Page d'erreur entiere : `div.page > div.oops` = tuile `span.oops__code`,
    titre `h1.display.display--h3`, retour `.actions > a.btn` vers `/`.
-   Definition UNIQUE de `error_404.html` et `error_500.html`, qui restent
-   distincts cote Rust (`#[template(path = ...)]`). `code` et `cta_label`
-   sont des PARAMETRES. `.oops` centre ses enfants, d'ou un `.actions` centre
+   Definition UNIQUE de `error.html` (struct Rust `ErrorPage`) : la 404 du
+   fallback et la 500 ne divergent que par le couple `code`/`message`.
+   `code` et `cta_label` sont des PARAMETRES. `.oops` centre ses enfants, d'ou un `.actions` centre
    alors qu'il est aligne a gauche dans les formulaires (divergence de
    conteneur, pas de composant). #}
 {% macro oops(code, message, cta_label) -%}

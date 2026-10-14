@@ -32,10 +32,10 @@ const P_CIDR: &str = "/api/admin/interface/cidr";
 const P_RESTART: &str = "/api/admin/interface/restart";
 const P_HOOKS: &str = "/api/admin/hooks";
 
-/// Balise rendue par `ui::field` : `input[type=text]`,
-/// `input[type=number]`, `input[type=password]` ou `textarea`. La case a
-/// cocher a sa propre entree ([`Check`]) : sa valeur POST vaut toujours
-/// `true`.
+/// Balise rendue par `ui::field` (via `adm::field`) : `input[type=text]`,
+/// `input[type=number]`, `input[type=password]` ou `textarea`
+/// (`multiline = true`). La case a cocher a sa propre entree ([`Check`]) :
+/// sa valeur POST vaut toujours `true`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldKind {
     Text,

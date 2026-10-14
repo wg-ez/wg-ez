@@ -5,45 +5,36 @@
 {% block content %}
   <div class="page">
     <div class="pad">
-      {# `.narrow` (26 rem, carte seule) vs `.narrow--wide` (44 rem, setup) :
-         largeur de colonne, pas de variante semantique. #}
-      <div class="narrow">
-        {# `hero__mark` : site unique, pas de macro. Seul le bouclier est
-           partage (`chrome::brand_shield`) ; le wrapper `.hero__logo` (mise en
-           page) et le wordmark restent inline. #}
-        <div class="hero__mark">
-          <span class="hero__logo" aria-hidden="true">
-            {{ chrome::brand_shield() }}
-          </span>
-          <span class="hero__name">
-            <span class="hero__wordmark">wg-<span class="accent">ez</span></span>
-          </span>
-        </div>
-
-        <section class="panel panel--card">
-          {# Titre-carte `h1.display` : `ui::phead_h1` (variante NIVEAU PAGE de
-             `ui::phead`), et non `phead` (`h2` des panneaux) : autre niveau
-             semantique. Le chapeau « version X » est pre-calcule cote Rust
-             (`t_version`) car `~` ne peut pas traverser `is_empty`. #}
-          {{ ui::phead_h1(base.title, t_version) }}
-
-          {% if password_disabled %}
-            {{ chrome::banner_warn(t_disabled) }}
-          {% endif %}
-
-          {# `method="post" + action` (repli sans JS) ET `hx-post` (htmx,
-             navigation via `HX-Redirect`) : complementaires, pas redondants.
-             Pas de macro `form` generique : `login_2fa` et le setup n'ont pas
-             de forme commune ; le `<form>` reste inline. #}
-          <form class="form" method="post" action="/api/auth/password" hx-post="/api/auth/password" hx-swap="none">
-            {{ ui::field(t_user, "text", "username", "", "username", "", "", "", "", false, true) }}
-            {{ ui::field(t_pass, "password", "password", "", "current-password", "12", "", "", "", false, true) }}
-            {{ ui::submit(t_submit, false) }}
-          </form>
-
-          {{ ui::note(t_note) }}
-        </section>
+      {# Preambule HORS carte : `hero__mark` (site unique, pas de macro). Seul
+         le bouclier est partage (`chrome::brand_shield`) ; le wrapper
+         `.hero__logo` (mise en page) et le wordmark restent inline. #}
+      <div class="hero__mark">
+        <span class="hero__logo" aria-hidden="true">
+          {{ chrome::brand_shield() }}
+        </span>
+        <span class="hero__name">
+          <span class="hero__wordmark">wg-<span class="accent">ez</span></span>
+        </span>
       </div>
+
+      {# Coquille de carte via `ui::auth_card` (`.narrow` + `section` +
+         `phead_h1`) ; le formulaire reste inline : les formulaires de login et
+         de 2FA divergent, seule la coquille est partagee. #}
+      {% call ui::auth_card(base.title, t_version) %}
+        {% if password_disabled %}
+          {{ chrome::banner_warn(t_disabled) }}
+        {% endif %}
+
+        {# `method="post" + action` (repli sans JS) ET `hx-post` (htmx,
+           navigation via `HX-Redirect`) : complementaires, pas redondants. #}
+        <form class="form" method="post" action="/api/auth/password" hx-post="/api/auth/password" hx-swap="none">
+          {{ ui::field(t_user, "text", "username", "", "username", "", "", "", "", false, true) }}
+          {{ ui::field(t_pass, "password", "password", "", "current-password", "12", "", "", "", false, true) }}
+          {{ ui::submit(t_submit, false) }}
+        </form>
+
+        {{ ui::note(t_note) }}
+      {% endcall %}
     </div>
   </div>
 {% endblock %}

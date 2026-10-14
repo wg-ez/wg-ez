@@ -3,75 +3,72 @@
 
 {% block content %}
   {#
-    Fiche client : bandeau d'identite via `ui::pill`, tetes de panneau via
+    Fiche client : bandeau d'identite via `ui::hero` dans le `.stack` (filet
+    bas comme `/admin`), tetes de panneau via
     `ui::phead`, champs via `ui::field`, champs caches via `ui::hidden`, note
-    PSK via `ui::note`. Restent INLINE, avec justification locale : le fil
-    d'ariane, le titre de page `h1.display`, la paire `.actions` Save + retour
-    (ordre propre a cette page), les boutons MUTATEURS `hx-*` (PSK, danger) que
-    `ui::submit` ne couvre pas, et la note a lien admin conditionnel
-    (`t_hooks_note` + `<a>`, or `ui::note` ne prend que du texte).
+    PSK via `ui::note`. Restent INLINE, avec justification locale : le titre
+    de page `h1.display`, la paire `.actions` Save + retour
+    (ordre propre a cette page), les boutons MUTATEURS via `ui::mutate`
+    (PSK, danger ; `ui::submit` ne couvre que la soumission), et la note a lien admin conditionnel
+    (`labels.hooks_note` + `<a>`, or `ui::note` ne prend que du texte).
   #}
   <div class="page">
-    <div class="pad">
-      <p class="hud"><a href="/">{{ base.tr.nav_clients }}</a> / {{ c.name }}</p>
-      <h1 class="display display--h3">{{ c.name }}</h1>
-      <div class="row">
-        {% if c.connected %}
-          {{ ui::pill(base.tr.h_up, "live", true) }}
-        {% else %}
-          {{ ui::pill(base.tr.h_down, "", true) }}
-        {% endif %}
-        {% if c.enabled %}
-          {{ ui::pill(t_enabled, "live", false) }}
-        {% else %}
-          {{ ui::pill(t_disabled, "", false) }}
-        {% endif %}
-        {% if !expires.is_empty() %}
-          {{ ui::pill(expires, "warn", false) }}
-        {% endif %}
-        {# Le `·` joint v4/v6 au sein d'UNE pastille : `pill2` joint par une
-           espace, il ne convient donc pas ici. #}
-        {% if ipv6.is_empty() %}
-          {{ ui::pill(c.ipv4_address, "", false) }}
-        {% else %}
-          {{ ui::pill(c.ipv4_address ~ " · " ~ ipv6, "", false) }}
-        {% endif %}
-      </div>
-    </div>
-
     <div class="stack">
+      {% call ui::hero(c.name) %}
+      {% if c.connected %}
+        {{ ui::pill(base.tr.h_up, "live", true) }}
+      {% else %}
+        {{ ui::pill(base.tr.h_down, "", true) }}
+      {% endif %}
+      {% if c.enabled %}
+        {{ ui::pill(labels.enabled, "live", false) }}
+      {% else %}
+        {{ ui::pill(labels.disabled, "", false) }}
+      {% endif %}
+      {% if !expires.is_empty() %}
+        {{ ui::pill(expires, "warn", false) }}
+      {% endif %}
+      {# Le `·` joint v4/v6 au sein d'UNE pastille : `pill2` joint par une
+         espace, il ne convient donc pas ici. #}
+      {% if ipv6.is_empty() %}
+        {{ ui::pill(c.ipv4_address, "", false) }}
+      {% else %}
+        {{ ui::pill(c.ipv4_address ~ " · " ~ ipv6, "", false) }}
+      {% endif %}
+    {% endcall %}
+
       <section class="panel">
-        {{ ui::phead(t_title, base.iface) }}
+        {{ ui::phead(labels.title, base.iface) }}
 
         <form class="form" hx-post="/api/client/{{ c.id }}" hx-swap="none">
           <div class="form-2">
-            {{ ui::field(t_name, "text", "name", c.name, "", "", "", "", "64", false, true) }}
+            {{ ui::field(labels.name, "text", "name", c.name, maxlength = "64", required = true) }}
             {# `expiresAt` est reserve aux admins (403 sinon cote API) ; le
                proprietaire CLIENT ne doit ni le voir ni le soumettre. #}
             {% if base.is_admin %}
-              {{ ui::field(t_expires_at, "text", "expiresAt", expires, "", "", "", "", "", false, false, placeholder = ph_expires) }}
+              {{ ui::field(labels.expires_at, "text", "expiresAt", expires, placeholder = ph.expires) }}
             {% endif %}
-            {{ ui::field(t_ipv4, "text", "ipv4Address", ipv4, "", "", "", "", "", false, false, disabled = !base.ipv4_enabled) }}
-            {{ ui::field(t_ipv6, "text", "ipv6Address", ipv6, "", "", "", "", "", false, false, disabled = !base.ipv6_enabled) }}
-            {{ ui::field(t_mtu, "number", "mtu", c.mtu.to_string(), "", "", "", "", "", false, false, min = "1024", max = "9000") }}
-            {{ ui::field(t_keepalive, "number", "persistentKeepalive", c.persistent_keepalive.to_string(), "", "", "", "", "", false, false, min = "0", max = "65535") }}
+            {{ ui::field(labels.ipv4, "text", "ipv4Address", ipv4, disabled = !base.ipv4_enabled) }}
+            {{ ui::field(labels.ipv6, "text", "ipv6Address", ipv6, disabled = !base.ipv6_enabled) }}
+            {{ ui::field(labels.mtu, "number", "mtu", c.mtu.to_string(), min = "1024", max = "9000") }}
+            {{ ui::field(labels.keepalive, "number", "persistentKeepalive", c.persistent_keepalive.to_string(), min = "0", max = "65535") }}
           </div>
 
-          {{ ui::field(t_allowed_ips_v4, "text", "allowedIpsV4", allowed_ips_v4, "", "", "", "", "", false, false, placeholder = ph_allowed_v4, disabled = !base.ipv4_enabled) }}
-          {{ ui::field(t_allowed_ips_v6, "text", "allowedIpsV6", allowed_ips_v6, "", "", "", "", "", false, false, placeholder = ph_allowed_v6, disabled = !base.ipv6_enabled) }}
+          {{ ui::field(labels.allowed_ips_v4, "text", "allowedIpsV4", allowed_ips_v4, placeholder = ph.allowed_v4, disabled = !base.ipv4_enabled) }}
+          {{ ui::field(labels.allowed_ips_v6, "text", "allowedIpsV6", allowed_ips_v6, placeholder = ph.allowed_v6, disabled = !base.ipv6_enabled) }}
           {# `serverAllowedIps` est reserve aux admins (403 sinon cote API) ;
              le proprietaire CLIENT ne doit ni le voir ni le soumettre. #}
           {% if base.is_admin %}
-            {{ ui::field(t_server_allowed_ips_v4, "text", "serverAllowedIpsV4", server_allowed_ips_v4, "", "", "", "", "", false, false, placeholder = ph_server_allowed_v4, disabled = !base.ipv4_enabled) }}
-            {{ ui::field(t_server_allowed_ips_v6, "text", "serverAllowedIpsV6", server_allowed_ips_v6, "", "", "", "", "", false, false, placeholder = ph_server_allowed_v6, disabled = !base.ipv6_enabled) }}
+            {{ ui::field(labels.server_allowed_ips_v4, "text", "serverAllowedIpsV4", server_allowed_ips_v4, placeholder = ph.server_allowed_v4, disabled = !base.ipv4_enabled) }}
+            {{ ui::field(labels.server_allowed_ips_v6, "text", "serverAllowedIpsV6", server_allowed_ips_v6, placeholder = ph.server_allowed_v6, disabled = !base.ipv6_enabled) }}
           {% endif %}
-          {{ ui::field(t_dns_v4, "text", "dnsV4", dns_v4, "", "", "", "", "", false, false, placeholder = ph_dns_v4, disabled = !base.ipv4_enabled) }}
-          {{ ui::field(t_dns_v6, "text", "dnsV6", dns_v6, "", "", "", "", "", false, false, placeholder = ph_dns_v6, disabled = !base.ipv6_enabled) }}
+          {{ ui::field(labels.dns_v4, "text", "dnsV4", dns_v4, placeholder = ph.dns_v4, disabled = !base.ipv4_enabled) }}
+          {{ ui::field(labels.dns_v6, "text", "dnsV6", dns_v6, placeholder = ph.dns_v6, disabled = !base.ipv6_enabled) }}
           {% if firewall_on %}
-            {{ ui::field(t_firewall_ips_v4, "text", "firewallIpsV4", firewall_ips_v4, "", "", "", "", "", false, false, placeholder = ph_firewall_v4, disabled = !base.ipv4_enabled) }}
-            {{ ui::field(t_firewall_ips_v6, "text", "firewallIpsV6", firewall_ips_v6, "", "", "", "", "", false, false, placeholder = ph_firewall_v6, disabled = !base.ipv6_enabled) }}
+            {{ ui::field(labels.firewall_ips_v4, "text", "firewallIpsV4", firewall_ips_v4, placeholder = ph.firewall_v4, disabled = !base.ipv4_enabled) }}
+            {{ ui::field(labels.firewall_ips_v6, "text", "firewallIpsV6", firewall_ips_v6, placeholder = ph.firewall_v6, disabled = !base.ipv6_enabled) }}
           {% endif %}
-          {{ ui::field(t_endpoint, "text", "serverEndpoint", endpoint, "", "", "", "", "", false, false, placeholder = ph_endpoint) }}
+          {{ ui::field(labels.endpoint, "text", "serverEndpoint", endpoint, placeholder = ph.endpoint) }}
           {#
             Pas de case `enabled` ici (le toggle vit sur les cartes de `/`) :
             un champ cache rejoue l'etat courant, car un champ absent serait
@@ -83,13 +80,13 @@
           {# `.actions` Save + retour : le bouton de soumission et un
              `a.btn--ghost` de navigation, ordre propre a la fiche client. #}
           <div class="actions">
-            <button class="btn" type="submit">{{ t_save }}</button>
-            <a class="btn btn--ghost" href="/">{{ t_back }}</a>
+            <button class="btn" type="submit">{{ labels.save }}</button>
+            <a class="btn btn--ghost" href="/">{{ labels.back }}</a>
           </div>
           {# Note a balisage conditionnel (lien admin) : hors `ui::note`
              (texte seul), elle reste inline. #}
           <p class="note">
-            {{ t_hooks_note }}{% if base.is_admin %} ·
+            {{ labels.hooks_note }}{% if base.is_admin %} ·
             <a class="accent" href="/admin">{{ base.tr.nav_admin }}</a>{% endif %}
           </p>
         </form>
@@ -99,59 +96,28 @@
          serveur refait un `Tunnel::apply` complet a chaque action. #}
       <section class="panel">
         {% if c.has_pre_shared_key %}
-          {{ ui::phead(t_psk_title, t_psk_on) }}
+          {{ ui::phead(labels.psk_title, labels.psk_on) }}
         {% else %}
-          {{ ui::phead(t_psk_title, t_psk_off) }}
+          {{ ui::phead(labels.psk_title, labels.psk_off) }}
         {% endif %}
         <div class="actions">
           {% if c.has_pre_shared_key %}
-            <button
-              class="btn btn--danger"
-              type="button"
-              hx-delete="/api/client/{{ c.id }}/psk"
-              hx-swap="none"
-              hx-confirm="{{ t_psk_remove_confirm }}"
-            >
-              {{ t_psk_remove }}
-            </button>
+            {{ ui::mutate(labels.psk_remove, "danger", true, "/api/client/" ~ c.id ~ "/psk", labels.psk_remove_confirm) }}
           {% else %}
-            <button
-              class="btn"
-              type="button"
-              hx-post="/api/client/{{ c.id }}/psk"
-              hx-swap="none"
-            >
-              {{ t_psk_generate }}
-            </button>
+            {{ ui::mutate(labels.psk_generate, "", false, "/api/client/" ~ c.id ~ "/psk") }}
           {% endif %}
         </div>
-        {{ ui::note(t_psk_note) }}
+        {{ ui::note(labels.psk_note) }}
       </section>
 
       {#
         Zone danger dans la meme colonne : le filet de cloture vient du stack.
       #}
       <section class="panel panel--danger">
-        {{ ui::phead(t_danger_zone, c.name) }}
+        {{ ui::phead(labels.danger_zone, c.name) }}
         <div class="actions">
-          <button
-            class="btn btn--danger"
-            type="button"
-            hx-delete="/api/client/{{ c.id }}"
-            hx-swap="none"
-            hx-confirm="{{ t_delete_confirm }}"
-          >
-            {{ t_delete }}
-          </button>
-          <button
-            class="btn btn--ghost"
-            type="button"
-            hx-post="/api/client/{{ c.id }}/rotateKeys"
-            hx-swap="none"
-            hx-confirm="{{ t_rotate_confirm }}"
-          >
-            {{ t_rotate_keys }}
-          </button>
+          {{ ui::mutate(labels.delete, "danger", true, "/api/client/" ~ c.id, labels.delete_confirm) }}
+          {{ ui::mutate(labels.rotate_keys, "ghost", false, "/api/client/" ~ c.id ~ "/rotateKeys", labels.rotate_confirm) }}
         </div>
       </section>
     </div>

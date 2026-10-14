@@ -2,25 +2,14 @@
 {% import "partials/ui.html" as ui %}
 
 {% block content %}
-  <div class="page">
-    <div class="pad">
-      <div class="narrow--wide">
-        {{ ui::wizard(s1, s2, s3, 2) }}
-
-        <div class="stack">
-          <section class="panel">
-            {{ ui::phead_h1(title, s2) }}
-            <form class="form" method="post" action="/api/setup/2" hx-post="/api/setup/2" hx-swap="none">
-              {{ ui::field(username, "text", "username", "", "username", "2", "", "", "", false, true) }}
-              {{ ui::field(password, "password", "password", "", "new-password", "12", "", "", "", false, true) }}
-              <div class="actions">
-                <a class="btn btn--ghost" href="/setup/1">{{ back }}</a>
-                <button class="btn" type="submit">{{ cta }}</button>
-              </div>
-            </form>
-          </section>
-        </div>
+  {% call ui::setup_shell(common.s1, common.s2, common.s3, 2, common.title, common.s2) %}
+    <form class="form" method="post" action="/api/setup/2" hx-post="/api/setup/2" hx-swap="none">
+      {{ ui::field(username, "text", "username", "", "username", "2", "", "", "", false, true) }}
+      {{ ui::field(password, "password", "password", "", "new-password", "12", "", "", "", false, true) }}
+      <div class="actions">
+        <a class="btn btn--ghost" href="/setup/1">{{ common.back }}</a>
+        <button class="btn" type="submit">{{ common.cta }}</button>
       </div>
-    </div>
-  </div>
+    </form>
+  {% endcall %}
 {% endblock %}

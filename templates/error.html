@@ -2,5 +2,5 @@
 {% import "partials/ui.html" as ui %}
 
 {% block content %}
-  {{ ui::oops("500", t_e500, t_back_home) }}
+  {{ ui::oops(code, message, t_back_home) }}
 {% endblock %}

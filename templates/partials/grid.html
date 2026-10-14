@@ -1,8 +1,8 @@
 {% import "partials/ui.html" as ui %}
 {% for c in cards %}
-  {{ ui::client_card(c, t_endpoint, t_expires, t_rx, t_tx, t_qrcode, t_config, t_otl, t_otl_short, t_enable, t_disable, t_disabled) }}
+  {{ ui::client_card(c, labels.endpoint, labels.expires, labels.rx, labels.tx, labels.qrcode, labels.config, labels.otl, labels.otl_short, labels.enable, labels.disable, labels.disabled) }}
 {% else %}
-  {{ ui::empty(t_empty_title, t_empty_body, t_empty_cta, t_name) }}
+  {{ ui::empty(labels.empty_title, labels.empty_body, labels.empty_cta, labels.name) }}
 {% endfor %}
 {# Bouchons de fin de rangee via `ui::fillers` (`fillers` vient du Rust,
    `len % 6`). #}

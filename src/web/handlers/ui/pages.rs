@@ -13,7 +13,9 @@ use axum_extra::extract::CookieJar;
 use super::{
     cards::{Card, display_date, grid_fillers, load_cards},
     chrome::{Base, LangQuery, NAV_CLIENTS, NAV_ME, page_context, page_prefs, redirect},
-    partials::{GridLabels, GridPartial, MeInnerPartial, MeLabels},
+    partials::{
+        ClientLabels, ClientPlaceholders, GridLabels, GridPartial, MeInnerPartial, MeLabels,
+    },
     render_fragment, render_page,
 };
 use crate::web::{
@@ -40,21 +42,9 @@ pub struct IndexPage {
     pub t_desc: String,
     pub t_created_asc: String,
     pub t_created_desc: String,
-    pub t_empty_title: String,
-    pub t_empty_body: String,
-    pub t_empty_cta: String,
-    pub t_name: String,
-    pub t_rx: String,
-    pub t_tx: String,
-    pub t_expires: String,
-    pub t_endpoint: String,
-    pub t_qrcode: String,
-    pub t_config: String,
-    pub t_otl: String,
-    pub t_otl_short: String,
-    pub t_enable: String,
-    pub t_disable: String,
-    pub t_disabled: String,
+    /// Libelles partages avec `GridPartial` (cf. `GridLabels`), embarques au
+    /// lieu d'etre aplatis : un ajout ne touche que `GridLabels` + gabarits.
+    pub labels: GridLabels,
 }
 
 impl IndexPage {
@@ -87,21 +77,7 @@ impl IndexPage {
             t_desc: t("clients.sort_desc"),
             t_created_asc: t("clients.sort_created_asc"),
             t_created_desc: t("clients.sort_created_desc"),
-            t_empty_title: labels.empty_title,
-            t_empty_body: labels.empty_body,
-            t_empty_cta: labels.empty_cta,
-            t_name: labels.name,
-            t_rx: labels.rx,
-            t_tx: labels.tx,
-            t_expires: labels.expires,
-            t_endpoint: labels.endpoint,
-            t_qrcode: labels.qrcode,
-            t_config: labels.config,
-            t_otl: labels.otl,
-            t_otl_short: labels.otl_short,
-            t_enable: labels.enable,
-            t_disable: labels.disable,
-            t_disabled: labels.disabled,
+            labels,
         }
     }
 }
@@ -207,55 +183,12 @@ pub struct ClientPage {
     pub expires: String,
     pub ipv6: String,
     pub endpoint: String,
-    // Libelles localises du formulaire (client_form.*), precalcules pour que
-    // le template ne contienne aucun texte en dur.
-    pub t_title: String,
-    pub t_name: String,
-    pub t_enabled: String,
-    pub t_expires_at: String,
-    pub t_ipv4: String,
-    pub t_ipv6: String,
-    pub t_dns_v4: String,
-    pub t_dns_v6: String,
-    pub t_allowed_ips_v4: String,
-    pub t_allowed_ips_v6: String,
-    pub t_server_allowed_ips_v4: String,
-    pub t_server_allowed_ips_v6: String,
-    pub t_firewall_ips_v4: String,
-    pub t_firewall_ips_v6: String,
-    pub t_mtu: String,
-    pub t_keepalive: String,
-    pub t_endpoint: String,
-    pub t_save: String,
-    pub t_back: String,
-    pub t_hooks_note: String,
-    pub t_disabled: String,
+    // Libelles localises du formulaire (`client_form.*`, cf. `ClientLabels`),
+    // precalcules pour que le template ne contienne aucun texte en dur.
+    pub labels: ClientLabels,
     // Placeholders = valeur effective quand le champ est vide (heritage du
-    // defaut global ou `auto`) : le placeholder natif ne s'affiche que si
-    // `value` est vide, donc on les renseigne sans condition.
-    pub ph_expires: String,
-    pub ph_allowed_v4: String,
-    pub ph_allowed_v6: String,
-    pub ph_dns_v4: String,
-    pub ph_dns_v6: String,
-    pub ph_firewall_v4: String,
-    pub ph_firewall_v6: String,
-    pub ph_endpoint: String,
-    pub ph_server_allowed_v4: String,
-    pub ph_server_allowed_v6: String,
-    pub t_danger_zone: String,
-    pub t_delete: String,
-    pub t_delete_confirm: String,
-    pub t_rotate_keys: String,
-    pub t_rotate_confirm: String,
-    // Pre-shared key (override par client).
-    pub t_psk_title: String,
-    pub t_psk_on: String,
-    pub t_psk_off: String,
-    pub t_psk_generate: String,
-    pub t_psk_remove: String,
-    pub t_psk_remove_confirm: String,
-    pub t_psk_note: String,
+    // defaut global ou `auto`, cf. `ClientPlaceholders`).
+    pub ph: ClientPlaceholders,
 }
 
 pub async fn client_detail<B: Backend>(
@@ -317,6 +250,26 @@ pub async fn client_detail<B: Backend>(
         allowed_v6.clone()
     };
 
+    let labels = ClientLabels::load(&t);
+    // Exemples au format EXIGE (`backend/clients.rs::parse_expires_at`,
+    // RFC 3339 historique accepte, tout le reste = 400) et de sous-reseau
+    // supplementaire route vers ce pair (le `/32`+`/128` du tunnel est deja
+    // automatique, cf. `push_peer`), par famille : le placeholder du champ
+    // v6 ne doit jamais montrer une adresse v4. Exemple de domaine public
+    // expose (format `host:port`) pour l'endpoint.
+    let ph = ClientPlaceholders::new(
+        "25-12-2031".to_string(),
+        def_allowed_v4,
+        def_allowed_v6,
+        def.default_dns_v4.join(", "),
+        def.default_dns_v6.join(", "),
+        ph_firewall_v4,
+        ph_firewall_v6,
+        "vpn.example.com:51820".to_string(),
+        "192.168.5.0/24".to_string(),
+        "fd00:dead:beef::/64".to_string(),
+    );
+
     let page = ClientPage {
         base,
         ipv4: c.ipv4_address.clone(),
@@ -338,56 +291,8 @@ pub async fn client_detail<B: Backend>(
         ipv6: c.ipv6_address.clone().unwrap_or_default(),
         endpoint: c.server_endpoint.clone().unwrap_or_default(),
         firewall_on: def.firewall_enabled,
-        t_title: t("client_form.title"),
-        t_name: t("client_form.name"),
-        t_enabled: t("client_form.enabled"),
-        t_expires_at: t("client_form.expires_at"),
-        t_ipv4: t("client_form.ipv4"),
-        t_ipv6: t("client_form.ipv6"),
-        t_dns_v4: t("client_form.dns_v4"),
-        t_dns_v6: t("client_form.dns_v6"),
-        t_allowed_ips_v4: t("client_form.allowed_ips_v4"),
-        t_allowed_ips_v6: t("client_form.allowed_ips_v6"),
-        t_server_allowed_ips_v4: t("client_form.server_allowed_ips_v4"),
-        t_server_allowed_ips_v6: t("client_form.server_allowed_ips_v6"),
-        t_firewall_ips_v4: t("client_form.firewall_ips_v4"),
-        t_firewall_ips_v6: t("client_form.firewall_ips_v6"),
-        t_mtu: t("client_form.mtu"),
-        t_keepalive: t("client_form.keepalive"),
-        t_endpoint: t("client_form.endpoint"),
-        t_save: t("client_form.save"),
-        t_back: t("client_form.back"),
-        t_hooks_note: t("client_form.hooks_note"),
-        t_disabled: t("clients.disabled"),
-        // Exemples au format EXIGE (`backend/clients.rs::parse_expires_at`,
-        // RFC 3339 historique accepte, tout le reste = 400).
-        ph_expires: "25-12-2031".to_string(),
-        ph_allowed_v4: def_allowed_v4,
-        ph_allowed_v6: def_allowed_v6,
-        ph_dns_v4: def.default_dns_v4.join(", "),
-        ph_dns_v6: def.default_dns_v6.join(", "),
-        ph_firewall_v4,
-        ph_firewall_v6,
-        // Exemple de domaine public expose (format `host:port`).
-        ph_endpoint: "vpn.example.com:51820".to_string(),
-        // Exemple de sous-reseau supplementaire route vers ce pair
-        // (le `/32`+`/128` du tunnel est deja automatique, cf. `push_peer`),
-        // par famille : le placeholder du champ v6 ne doit jamais montrer une
-        // adresse v4.
-        ph_server_allowed_v4: "192.168.5.0/24".to_string(),
-        ph_server_allowed_v6: "fd00:dead:beef::/64".to_string(),
-        t_danger_zone: t("client_form.danger_zone"),
-        t_delete: t("client_form.delete"),
-        t_delete_confirm: t("client_form.delete_confirm"),
-        t_rotate_keys: t("client_form.rotate_keys"),
-        t_rotate_confirm: t("client_form.rotate_confirm"),
-        t_psk_title: t("client_form.pre_shared_key"),
-        t_psk_on: t("client_form.pre_shared_key_on"),
-        t_psk_off: t("client_form.pre_shared_key_off"),
-        t_psk_generate: t("client_form.pre_shared_key_generate"),
-        t_psk_remove: t("client_form.pre_shared_key_remove"),
-        t_psk_remove_confirm: t("client_form.pre_shared_key_remove_confirm"),
-        t_psk_note: t("client_form.pre_shared_key_note"),
+        labels,
+        ph,
         c,
     };
     render_page(&page, &set)
@@ -398,22 +303,8 @@ pub async fn client_detail<B: Backend>(
 pub struct MePage {
     pub base: Base,
     pub user: crate::web::ctx::UserView,
-    pub t_role_client: String,
-    pub t_profile: String,
-    pub t_username: String,
-    pub t_username_note: String,
-    pub t_change_username: String,
-    pub t_password_title: String,
-    pub t_password_note: String,
-    pub t_current_password: String,
-    pub t_new_password: String,
-    pub t_change_password: String,
-    pub t_totp_title: String,
-    pub t_totp_enabled: String,
-    pub t_totp_disabled: String,
-    pub t_totp_setup: String,
-    pub t_totp_remove: String,
-    pub t_totp_active_note: String,
+    /// Libelles partages avec `MeInnerPartial` (cf. `MeLabels`).
+    pub labels: MeLabels,
 }
 
 impl MePage {
@@ -424,26 +315,10 @@ impl MePage {
         user: crate::web::ctx::UserView,
         t: &impl Fn(&str) -> String,
     ) -> Self {
-        let labels = MeLabels::load(t);
         Self {
             base,
             user,
-            t_role_client: labels.role_client,
-            t_profile: labels.profile,
-            t_username: labels.username,
-            t_username_note: labels.username_note,
-            t_change_username: labels.change_username,
-            t_password_title: labels.password_title,
-            t_password_note: labels.password_note,
-            t_current_password: labels.current_password,
-            t_new_password: labels.new_password,
-            t_change_password: labels.change_password,
-            t_totp_title: labels.totp_title,
-            t_totp_enabled: labels.totp_enabled,
-            t_totp_disabled: labels.totp_disabled,
-            t_totp_setup: labels.totp_setup,
-            t_totp_remove: labels.totp_remove,
-            t_totp_active_note: labels.totp_active_note,
+            labels: MeLabels::load(t),
         }
     }
 }

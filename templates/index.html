@@ -4,27 +4,23 @@
 {% block content %}
   <div class="page">
     {#
-      Bandeau d'identite de la section : meme grammaire que `/me` et le detail
-      client (`.pad` > titre `.display` + `.row` de `.pill`). Il vit HORS de
-      `#grid` : le sondage htmx ne remplace que les cartes, le bandeau n'est
-      donc jamais re-rendu par un tick.
+      Bandeau d'identite via `ui::hero` (titre + `.row` de `.pill`) : il vit
+      HORS de `#grid` (le sondage htmx ne remplace que les cartes, le bandeau
+      n'est donc jamais re-rendu par un tick).
 
       Le `.toolbar` porte son `border-top` (le bandeau remplace le filet bas du
       `.eyebrow`) et `#grid` reste en `.mesh--flush` : pas de double filet.
     #}
-    <div class="pad">
-      <h1 class="display display--h3">{{ base.title }}</h1>
-      <div class="row">
-        {{ ui::pill(base.iface, "", false) }}
-        {% if base.iface_up %}
-          {{ ui::pill(base.tr.h_up, "live", false) }}
-        {% else %}
-          {{ ui::pill(base.tr.h_down, "", false) }}
-        {% endif %}
-        {{ ui::pill2(client_count, base.tr.nav_clients, "", false) }}
-        {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
-      </div>
-    </div>
+    {% call ui::hero(base.title) %}
+      {{ ui::pill(base.iface, "", false) }}
+      {% if base.iface_up %}
+        {{ ui::pill(base.tr.h_up, "live", false) }}
+      {% else %}
+        {{ ui::pill(base.tr.h_down, "", false) }}
+      {% endif %}
+      {{ ui::pill2(client_count, base.tr.nav_clients, "", false) }}
+      {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
+    {% endcall %}
 
     {# Barre de recherche + tri via `ui::toolbar`. `#sort` garde le tri pour le
        sondage htmx de `#grid`. #}

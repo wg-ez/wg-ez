@@ -2,77 +2,76 @@
 {# Corps de `/me`, partage entre la page complete (`me.html`, qui l'inclut
    dans `#me-page`) et le refresh partiel (`MeInnerPartial`, renvoye par
    `GET /me` aux appelants htmx). Meme motif que `partials/grid.html`. Ne
-   reference que des champs presents dans `MePage` ET `MeInnerPartial`.
+   reference que des champs presents dans `MePage` ET `MeInnerPartial`
+   (`base`, `user`, `labels`).
 
-   Pastilles via `ui::pill`/`ui::pill2` (`2FA` est un invariant technique
-   identique EN/FR, comme `wg-ez`/`GitHub`). Tetes via `ui::phead`, champs via
+   Bandeau d'identite via `ui::hero` (titre + `.row` de `pill`/`pill2`,
+   `2FA` restant un invariant technique identique EN/FR, comme
+   `wg-ez`/`GitHub`). Tetes via `ui::phead`, champs via
    `ui::field`, envois via `ui::submit`, queue de filets via
    `ui::tail(true, "")`. #}
-<div class="pad">
-  <h1 class="display display--h3">{{ user.username }}</h1>
-  <div class="row">
-    {{ ui::pill(user.username, "", false) }}
-    {% if user.role == 1 %}
-      {{ ui::pill(base.tr.nav_admin, "live", false) }}
-    {% else %}
-      {{ ui::pill(t_role_client, "", false) }}
-    {% endif %}
-    {% if user.totp_verified %}
-      {{ ui::pill("2FA", "live", false) }}
-    {% endif %}
-    {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
-  </div>
-</div>
+{% call ui::hero(user.username) %}
+  {{ ui::pill(user.username, "", false) }}
+  {% if user.role == 1 %}
+    {{ ui::pill(base.tr.nav_admin, "live", false) }}
+  {% else %}
+    {{ ui::pill(labels.role_client, "", false) }}
+  {% endif %}
+  {% if user.totp_verified %}
+    {{ ui::pill("2FA", "live", false) }}
+  {% endif %}
+  {{ ui::pill2(base.tr.f_version, base.version, "", false) }}
+{% endcall %}
 
 <div class="mesh mesh--split">
   <div class="stack">
     <section class="panel">
-      {{ ui::phead(t_profile, user.username) }}
-      {{ ui::note(t_username_note) }}
+      {{ ui::phead(labels.profile, user.username) }}
+      {{ ui::note(labels.username_note) }}
       {# Le nom de connexion est visible dans le shell (sourcil) : le handler
          repond `HX-Redirect /me` (rechargement complet) et non `refreshMe`, qui
          ne re-render que `#me-page`. Garde mot de passe courant cote backend. #}
       <form class="form" hx-post="/api/me/username" hx-swap="none">
-        {{ ui::field(t_username, "text", "username", user.username, "username", "2", "", "", "", false, true) }}
-        {{ ui::field(t_current_password, "password", "currentPassword", "", "current-password", "", "", "", "", false, true) }}
-        {{ ui::submit(t_change_username, false) }}
+        {{ ui::field(labels.username, "text", "username", user.username, "username", "2", "", "", "", false, true) }}
+        {{ ui::field(labels.current_password, "password", "currentPassword", "", "current-password", "", "", "", "", false, true) }}
+        {{ ui::submit(labels.change_username, false) }}
       </form>
     </section>
 
     <section class="panel">
-      {{ ui::phead(t_password_title, t_password_note) }}
+      {{ ui::phead(labels.password_title, labels.password_note) }}
       <form class="form" hx-post="/api/me/password" hx-swap="none">
-        {{ ui::field(t_current_password, "password", "currentPassword", "", "current-password", "", "", "", "", false, true) }}
-        {{ ui::field(t_new_password, "password", "newPassword", "", "new-password", "12", "", "", "", false, true) }}
-        {{ ui::submit(t_change_password, false) }}
+        {{ ui::field(labels.current_password, "password", "currentPassword", "", "current-password", "", "", "", "", false, true) }}
+        {{ ui::field(labels.new_password, "password", "newPassword", "", "new-password", "12", "", "", "", false, true) }}
+        {{ ui::submit(labels.change_password, false) }}
       </form>
     </section>
   </div>
 
   <aside class="panel">
-    {{ ui::phead(t_totp_title, "") }}
+    {{ ui::phead(labels.totp_title, "") }}
 
     {% if user.totp_enabled %}
-      {{ ui::pill(t_totp_enabled, "live", false) }}
+      {{ ui::pill(labels.totp_enabled, "live", false) }}
       {# Toute modification de la 2FA (démarrage, confirmation, suppression,
          régénération) exige le mot de passe courant : le champ `password`
          ci-dessous est la garde réutilisée ; le backend refuse tout `start`
          ou `confirm` sans mot de passe, y compris au premier enrôlement. #}
-      {{ ui::note(t_totp_active_note) }}
+      {{ ui::note(labels.totp_active_note) }}
       <form class="form" hx-post="/api/me/totp" hx-swap="none">
         {{ ui::hidden("action", "remove") }}
-        {{ ui::field(t_current_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
-        {{ ui::submit(t_totp_remove, true) }}
+        {{ ui::field(labels.current_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
+        {{ ui::submit(labels.totp_remove, true) }}
       </form>
     {% else %}
-      {{ ui::pill(t_totp_disabled, "", false) }}
+      {{ ui::pill(labels.totp_disabled, "", false) }}
       {# Le démarrage exige lui aussi le mot de passe courant (preuve
          anti-session-volée, comme la confirmation et la suppression) : le
          backend refuse un `start` sans mot de passe. #}
       <form class="form" id="totp-start" hx-post="/api/me/totp" hx-target="#totp-slot" hx-swap="innerHTML">
         {{ ui::hidden("action", "start") }}
-        {{ ui::field(t_current_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
-        {{ ui::submit(t_totp_setup, false) }}
+        {{ ui::field(labels.current_password, "password", "password", "", "current-password", "", "", "", "", false, true) }}
+        {{ ui::submit(labels.totp_setup, false) }}
       </form>
     {% endif %}
 

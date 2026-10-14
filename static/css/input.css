@@ -173,15 +173,6 @@
     }
   }
 
-  .band {
-    padding: 1.5rem 1.25rem;
-  }
-  @media (min-width: 48rem) {
-    .band {
-      padding: 2.5rem;
-    }
-  }
-
   .hud,
   .nav__link,
   .menu__cap,
@@ -291,24 +282,6 @@
     white-space: normal;
     text-align: center;
     line-height: 1.5;
-  }
-
-  .grid {
-    display: grid;
-    gap: 1px;
-    background: var(--line);
-  }
-  .cell {
-    background: var(--bg);
-    min-width: 0;
-  }
-  .cols-2 {
-    grid-template-columns: 1fr;
-  }
-  @media (min-width: 48rem) {
-    .cols-2 {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
   }
 
   .mesh {
@@ -631,34 +604,6 @@
     }
   }
 
-  .icon-btn {
-    display: none;
-    align-items: center;
-    justify-content: center;
-    width: 3rem;
-    flex: none;
-    border: 0;
-    border-left: 1px solid var(--line);
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
-  }
-  .icon-btn:hover {
-    background: var(--ink-strong);
-    color: var(--bg);
-  }
-  .icon-btn svg {
-    width: 1rem;
-    height: 1rem;
-    fill: currentColor;
-    stroke: none;
-  }
-  @media (min-width: 48rem) {
-    .icon-btn {
-      display: flex;
-    }
-  }
   .nav__out {
     display: none;
   }
@@ -720,9 +665,6 @@
   }
 
   @media (max-width: 59.999rem) {
-    .nav .icon-btn {
-      display: none;
-    }
     .iface {
       display: none;
     }
@@ -1050,14 +992,6 @@
       display: block;
     }
   }
-  /* .eyebrow--flat non sticky : sinon masque le chapeau sticky */
-  .eyebrow--flat {
-    position: static;
-    border-top: 0;
-    background: var(--bg);
-    backdrop-filter: none;
-  }
-
   a:focus-visible,
   button:focus-visible,
   select:focus-visible,
@@ -1346,7 +1280,6 @@
     background: var(--bg);
   }
 
-  .panel > .tag,
   .panel > .pill {
     align-self: flex-start;
   }
@@ -1498,16 +1431,6 @@
     line-height: 1.5;
   }
 
-  pre {
-    margin: 0;
-    padding: 1rem;
-    overflow-x: auto;
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    line-height: 1.65;
-    color: var(--ink);
-  }
-
   .qr {
     width: 10rem;
     height: 10rem;
@@ -1549,6 +1472,14 @@
   }
   .wizard__i.is-on .wizard__l {
     color: #fff;
+  }
+
+  /* Setup : le rail `.wizard` (borde) + le panneau de contenu forment un
+     cadre continu : le panneau reprend les filets lateraux/bas dans la
+     largeur du rail (`border-top:0`, le bas du rail sert de separateur). */
+  .narrow--wide > .stack > .panel {
+    border: 1px solid var(--line);
+    border-top: 0;
   }
 
   /* .totp : jamais .stack (filets parasites + gap 0) */
@@ -1820,8 +1751,7 @@
     color: var(--faint);
   }
 
-  .pill,
-  .tag {
+  .pill {
     display: inline-flex;
     align-items: center;
     border: 1px solid var(--line);
@@ -1848,18 +1778,12 @@
     animation: pulse-dot 2s var(--ease) infinite;
   }
 
-  .tag {
-    padding: 0 6px;
-    color: var(--faint);
-    font-size: 0.5625rem;
-  }
   .pill--bad {
     border-color: color-mix(in srgb, var(--danger) 45%, transparent);
     color: var(--danger);
   }
-  /* modificateurs groupes APRES .pill/.tag (doivent gagner) */
-  .pill--live,
-  .tag--on {
+  /* modificateur groupe APRES .pill (doit gagner) */
+  .pill--live {
     border-color: color-mix(in srgb, var(--ok) 45%, transparent);
     color: var(--ok);
   }

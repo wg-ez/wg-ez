@@ -13,10 +13,12 @@
 
    - `head` DELEGUE a `ui::phead` (meme `.panel__head`) : `adm::head` n'est
      qu'un alias pilote par `Vec<Block>`.
-   - `field` prend un `Field` Rust (`kind` Text/Number/Area + `min`/`max` +
-     `rows=2` fige) ; `ui::field` prend des scalaires texte/password et ne
-     connait ni `textarea` ni `min`/`max`. Ne pas unifier sans toucher
-     `Vec<Block>` ou la signature de `ui::field`.
+   - `field` est un adaptateur fin sur `ui::field` (dispatch sur le `kind`
+     du `Field` Rust) : `Area` -> `multiline = true` (`textarea` `rows="2"`
+     fige), `Number` -> `min`/`max`, `Password` -> jamais de `value` (le hash
+     n'est jamais ecrit dans le HTML, vide = « inchangé » cote API) +
+     `autocomplete="new-password"`, `Text` -> champ simple. `ui::field`
+     porte la seule definition de la ligne de champ.
    - `check` (`label.switch`, case `value="true"`) n'a pas de pendant dans
      `ui.html` (seule l'admin a des interrupteurs) : pas d'`ui::switch` tant
      qu'il n'y a pas de second consommateur.
@@ -35,23 +37,20 @@
 {{ ui::phead(title, aside) }}
 {%- endmacro %}
 
-{# Ligne de champ : `label.flabel > span.hud + input|textarea`. Les attributs
-   litteraux (`name`, `type`, `min`/`max`, `rows`) sont le contrat avec l'API. #}
+{# Ligne de champ : adaptateur fin sur `ui::field` (seule definition de la
+   ligne de champ). Le dispatch se fait sur le `kind` du `Field` Rust ;
+   les attributs litteraux (`name`, `type`, `min`/`max`, `rows`) restent le
+   contrat avec l'API. #}
 {% macro field(f) -%}
-<label class="flabel">
-  <span class="hud">{{ f.label }}</span>
-  {% if f.is_area() -%}
-  <textarea class="field field--area" name="{{ f.name }}" rows="2"{% if f.disabled %} disabled{% endif %}>{{ f.value }}</textarea>
-  {%- else if f.is_number() -%}
-  <input class="field" type="number" name="{{ f.name }}" value="{{ f.value }}"{% if !f.min.is_empty() %} min="{{ f.min }}"{% endif %}{% if !f.max.is_empty() %} max="{{ f.max }}"{% endif %}{% if f.disabled %} disabled{% endif %} />
-  {%- else if f.is_password() -%}
-  {# Jamais de `value` : le hash n'est jamais ecrit dans le HTML. Vide =
-     « inchangé » cote API. #}
-  <input class="field" type="password" name="{{ f.name }}" value="" autocomplete="new-password"{% if !f.placeholder.is_empty() %} placeholder="{{ f.placeholder }}"{% endif %}{% if f.disabled %} disabled{% endif %} />
-  {%- else -%}
-  <input class="field" type="text" name="{{ f.name }}" value="{{ f.value }}"{% if f.disabled %} disabled{% endif %} />
-  {%- endif %}
-</label>
+{% if f.is_area() -%}
+{{ ui::field(f.label, "text", f.name, f.value, disabled = f.disabled, multiline = true) }}
+{%- else if f.is_number() -%}
+{{ ui::field(f.label, "number", f.name, f.value, min = f.min, max = f.max, disabled = f.disabled) }}
+{%- else if f.is_password() -%}
+{{ ui::field(f.label, "password", f.name, "", autocomplete = "new-password", placeholder = f.placeholder, disabled = f.disabled) }}
+{%- else -%}
+{{ ui::field(f.label, "text", f.name, f.value, disabled = f.disabled) }}
+{%- endif %}
 {%- endmacro %}
 
 {# Interrupteur a etat : hors de la grille de champs (`.form-2`). La case

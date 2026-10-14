@@ -32,7 +32,7 @@ pub mod static_files;
 pub use admin::{AdminPage, admin_page};
 pub use cards::Card;
 pub use chrome::{Base, LangQuery, Prefs, PrefsQuery, Tr, page_prefs};
-pub use errors::{InternalPage, NotFoundPage, internal_page, not_found};
+pub use errors::{ErrorPage, internal_page, not_found};
 pub use pages::{
     ClientPage, IndexPage, Login2faPage, LoginPage, MePage, client_detail, index, login, login_2fa,
     me,

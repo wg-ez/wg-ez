@@ -2,27 +2,16 @@
 {% import "partials/ui.html" as ui %}
 
 {% block content %}
-  <div class="page">
-    <div class="pad">
-      <div class="narrow--wide">
-        {{ ui::wizard(s1, s2, s3, 3) }}
-
-        <div class="stack">
-          <section class="panel">
-            {{ ui::phead_h1(title, s3) }}
-            <form class="form" method="post" action="/api/setup/3" hx-post="/api/setup/3" hx-swap="none">
-              {{ ui::field(host, "text", "host", hosts, "", "", "", "", "253", false, true) }}
-              {# `min`/`max` sont des arguments a valeur par defaut de
-                 `ui::field` : le port rentre dans la macro. #}
-              {{ ui::field(port_label, "number", "port", port, "", "", "", "", "", false, true, min = "1", max = "65535") }}
-              <div class="actions">
-                <a class="btn btn--ghost" href="/setup/2">{{ back }}</a>
-                <button class="btn" type="submit">{{ cta }}</button>
-              </div>
-            </form>
-          </section>
-        </div>
+  {% call ui::setup_shell(common.s1, common.s2, common.s3, 3, common.title, common.s3) %}
+    <form class="form" method="post" action="/api/setup/3" hx-post="/api/setup/3" hx-swap="none">
+      {{ ui::field(host, "text", "host", hosts, "", "", "", "", "253", false, true) }}
+      {# `min`/`max` sont des arguments a valeur par defaut de
+         `ui::field` : le port rentre dans la macro. #}
+      {{ ui::field(port_label, "number", "port", port, "", "", "", "", "", false, true, min = "1", max = "65535") }}
+      <div class="actions">
+        <a class="btn btn--ghost" href="/setup/2">{{ common.back }}</a>
+        <button class="btn" type="submit">{{ common.cta }}</button>
       </div>
-    </div>
-  </div>
+    </form>
+  {% endcall %}
 {% endblock %}

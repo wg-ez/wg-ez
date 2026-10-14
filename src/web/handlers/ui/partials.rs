@@ -11,26 +11,28 @@ use crate::web::ctx::UserView;
 /// Libelles partages par la grille : source unique des cles i18n utilisees a
 /// la fois par `GridPartial` (fragment htmx) et `IndexPage` (page complete).
 /// Tout ajout/renommage de cle se fait ici et nulle part ailleurs.
-pub(crate) struct GridLabels {
-    pub(crate) empty_title: String,
-    pub(crate) empty_body: String,
-    pub(crate) empty_cta: String,
-    pub(crate) name: String,
-    pub(crate) rx: String,
-    pub(crate) tx: String,
-    pub(crate) expires: String,
-    pub(crate) endpoint: String,
-    pub(crate) qrcode: String,
-    pub(crate) config: String,
-    pub(crate) otl: String,
-    pub(crate) otl_short: String,
-    pub(crate) enable: String,
-    pub(crate) disable: String,
-    pub(crate) disabled: String,
+/// Les pages embarquent ce struct (`labels`) au lieu d'aplatir ses champs :
+/// un ajout ne touche que ce struct, son `load` et les gabarits (`labels.x`).
+pub struct GridLabels {
+    pub empty_title: String,
+    pub empty_body: String,
+    pub empty_cta: String,
+    pub name: String,
+    pub rx: String,
+    pub tx: String,
+    pub expires: String,
+    pub endpoint: String,
+    pub qrcode: String,
+    pub config: String,
+    pub otl: String,
+    pub otl_short: String,
+    pub enable: String,
+    pub disable: String,
+    pub disabled: String,
 }
 
 impl GridLabels {
-    pub(crate) fn load(t: &impl Fn(&str) -> String) -> Self {
+    pub fn load(t: &impl Fn(&str) -> String) -> Self {
         Self {
             empty_title: t("clients.empty_title"),
             empty_body: t("clients.empty_body"),
@@ -57,23 +59,8 @@ pub struct GridPartial {
     pub cards: Vec<Card>,
     /// Bouchons de fin de rangee (`cards.len() % 6`, cf. `grid_fillers`).
     pub fillers: Vec<&'static str>,
-    pub t_empty_title: String,
-    pub t_empty_body: String,
-    pub t_empty_cta: String,
-    /// Caption « Name » du champ du modal « nouveau client » declenche par le
-    /// CTA de l'etat vide (`data-n`). Le libelle vient de `client_form.name`.
-    pub t_name: String,
-    pub t_rx: String,
-    pub t_tx: String,
-    pub t_expires: String,
-    pub t_endpoint: String,
-    pub t_qrcode: String,
-    pub t_config: String,
-    pub t_otl: String,
-    pub t_otl_short: String,
-    pub t_enable: String,
-    pub t_disable: String,
-    pub t_disabled: String,
+    /// Libelles partages avec `IndexPage` (cf. `GridLabels`).
+    pub labels: GridLabels,
 }
 
 impl GridPartial {
@@ -82,25 +69,10 @@ impl GridPartial {
         fillers: Vec<&'static str>,
         t: &impl Fn(&str) -> String,
     ) -> Self {
-        let labels = GridLabels::load(t);
         Self {
             cards,
             fillers,
-            t_empty_title: labels.empty_title,
-            t_empty_body: labels.empty_body,
-            t_empty_cta: labels.empty_cta,
-            t_name: labels.name,
-            t_rx: labels.rx,
-            t_tx: labels.tx,
-            t_expires: labels.expires,
-            t_endpoint: labels.endpoint,
-            t_qrcode: labels.qrcode,
-            t_config: labels.config,
-            t_otl: labels.otl,
-            t_otl_short: labels.otl_short,
-            t_enable: labels.enable,
-            t_disable: labels.disable,
-            t_disabled: labels.disabled,
+            labels: GridLabels::load(t),
         }
     }
 }
@@ -118,27 +90,29 @@ pub struct TotpStartPartial {
 
 /// Libelles partages par `/me` : source unique des cles i18n utilisees a la
 /// fois par `MeInnerPartial` (fragment htmx) et `MePage` (page complete).
-pub(crate) struct MeLabels {
-    pub(crate) role_client: String,
-    pub(crate) profile: String,
-    pub(crate) username: String,
-    pub(crate) username_note: String,
-    pub(crate) change_username: String,
-    pub(crate) password_title: String,
-    pub(crate) password_note: String,
-    pub(crate) current_password: String,
-    pub(crate) new_password: String,
-    pub(crate) change_password: String,
-    pub(crate) totp_title: String,
-    pub(crate) totp_enabled: String,
-    pub(crate) totp_disabled: String,
-    pub(crate) totp_setup: String,
-    pub(crate) totp_remove: String,
-    pub(crate) totp_active_note: String,
+/// Embarque via `labels` (cf. `GridLabels`) : un ajout ne touche que ce
+/// struct, son `load` et `me_inner.html` (`labels.x`).
+pub struct MeLabels {
+    pub role_client: String,
+    pub profile: String,
+    pub username: String,
+    pub username_note: String,
+    pub change_username: String,
+    pub password_title: String,
+    pub password_note: String,
+    pub current_password: String,
+    pub new_password: String,
+    pub change_password: String,
+    pub totp_title: String,
+    pub totp_enabled: String,
+    pub totp_disabled: String,
+    pub totp_setup: String,
+    pub totp_remove: String,
+    pub totp_active_note: String,
 }
 
 impl MeLabels {
-    pub(crate) fn load(t: &impl Fn(&str) -> String) -> Self {
+    pub fn load(t: &impl Fn(&str) -> String) -> Self {
         Self {
             role_client: t("me.role_client"),
             profile: t("me.profile"),
@@ -160,6 +134,134 @@ impl MeLabels {
     }
 }
 
+/// Libelles de la fiche client (`client_form.*` + `clients.disabled`) :
+/// source unique des cles i18n de `ClientPage` (cf. `GridLabels`/`MeLabels`).
+/// La page embarque ce struct (`labels`) au lieu d'aplatir ses champs : un
+/// ajout ne touche que ce struct, son `load` et `client.html` (`labels.x`).
+/// Les valeurs restent a plat sur `ClientPage` (contrat API : `name=`).
+pub struct ClientLabels {
+    pub title: String,
+    pub name: String,
+    pub enabled: String,
+    pub expires_at: String,
+    pub ipv4: String,
+    pub ipv6: String,
+    pub dns_v4: String,
+    pub dns_v6: String,
+    pub allowed_ips_v4: String,
+    pub allowed_ips_v6: String,
+    pub server_allowed_ips_v4: String,
+    pub server_allowed_ips_v6: String,
+    pub firewall_ips_v4: String,
+    pub firewall_ips_v6: String,
+    pub mtu: String,
+    pub keepalive: String,
+    pub endpoint: String,
+    pub save: String,
+    pub back: String,
+    pub hooks_note: String,
+    pub disabled: String,
+    pub danger_zone: String,
+    pub delete: String,
+    pub delete_confirm: String,
+    pub rotate_keys: String,
+    pub rotate_confirm: String,
+    pub psk_title: String,
+    pub psk_on: String,
+    pub psk_off: String,
+    pub psk_generate: String,
+    pub psk_remove: String,
+    pub psk_remove_confirm: String,
+    pub psk_note: String,
+}
+
+impl ClientLabels {
+    pub fn load(t: &impl Fn(&str) -> String) -> Self {
+        Self {
+            title: t("client_form.title"),
+            name: t("client_form.name"),
+            enabled: t("client_form.enabled"),
+            expires_at: t("client_form.expires_at"),
+            ipv4: t("client_form.ipv4"),
+            ipv6: t("client_form.ipv6"),
+            dns_v4: t("client_form.dns_v4"),
+            dns_v6: t("client_form.dns_v6"),
+            allowed_ips_v4: t("client_form.allowed_ips_v4"),
+            allowed_ips_v6: t("client_form.allowed_ips_v6"),
+            server_allowed_ips_v4: t("client_form.server_allowed_ips_v4"),
+            server_allowed_ips_v6: t("client_form.server_allowed_ips_v6"),
+            firewall_ips_v4: t("client_form.firewall_ips_v4"),
+            firewall_ips_v6: t("client_form.firewall_ips_v6"),
+            mtu: t("client_form.mtu"),
+            keepalive: t("client_form.keepalive"),
+            endpoint: t("client_form.endpoint"),
+            save: t("client_form.save"),
+            back: t("client_form.back"),
+            hooks_note: t("client_form.hooks_note"),
+            disabled: t("clients.disabled"),
+            danger_zone: t("client_form.danger_zone"),
+            delete: t("client_form.delete"),
+            delete_confirm: t("client_form.delete_confirm"),
+            rotate_keys: t("client_form.rotate_keys"),
+            rotate_confirm: t("client_form.rotate_confirm"),
+            psk_title: t("client_form.pre_shared_key"),
+            psk_on: t("client_form.pre_shared_key_on"),
+            psk_off: t("client_form.pre_shared_key_off"),
+            psk_generate: t("client_form.pre_shared_key_generate"),
+            psk_remove: t("client_form.pre_shared_key_remove"),
+            psk_remove_confirm: t("client_form.pre_shared_key_remove_confirm"),
+            psk_note: t("client_form.pre_shared_key_note"),
+        }
+    }
+}
+
+/// Placeholders de la fiche client : valeur effective quand le champ est vide
+/// (heritage du defaut global ou `auto`). Le placeholder natif ne s'affiche
+/// que si `value` est vide, donc la page les renseigne sans condition.
+/// Aucune cle i18n ici (valeurs calculees + exemples figes) : le `new` prend
+/// les valeurs calculees, les exemples vivent dans le constructeur.
+pub struct ClientPlaceholders {
+    pub expires: String,
+    pub allowed_v4: String,
+    pub allowed_v6: String,
+    pub dns_v4: String,
+    pub dns_v6: String,
+    pub firewall_v4: String,
+    pub firewall_v6: String,
+    pub endpoint: String,
+    pub server_allowed_v4: String,
+    pub server_allowed_v6: String,
+}
+
+impl ClientPlaceholders {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        expires: String,
+        allowed_v4: String,
+        allowed_v6: String,
+        dns_v4: String,
+        dns_v6: String,
+        firewall_v4: String,
+        firewall_v6: String,
+        endpoint: String,
+        server_allowed_v4: String,
+        server_allowed_v6: String,
+    ) -> Self {
+        Self {
+            expires,
+            allowed_v4,
+            allowed_v6,
+            dns_v4,
+            dns_v6,
+            firewall_v4,
+            firewall_v6,
+            endpoint,
+            server_allowed_v4,
+            server_allowed_v6,
+        }
+    }
+}
+
 /// Corps de `/me` (cf. `partials/me_inner.html`), renvoye seul aux appelants
 /// htmx quand la 2FA change d'etat (trigger `refreshMe`). Meme motif que
 /// `GridPartial` sur l'accueil : aucun `hx-select` cote client.
@@ -168,46 +270,16 @@ impl MeLabels {
 pub struct MeInnerPartial {
     pub base: Base,
     pub user: UserView,
-    pub t_role_client: String,
-    pub t_profile: String,
-    pub t_username: String,
-    pub t_username_note: String,
-    pub t_change_username: String,
-    pub t_password_title: String,
-    pub t_password_note: String,
-    pub t_current_password: String,
-    pub t_new_password: String,
-    pub t_change_password: String,
-    pub t_totp_title: String,
-    pub t_totp_enabled: String,
-    pub t_totp_disabled: String,
-    pub t_totp_setup: String,
-    pub t_totp_remove: String,
-    pub t_totp_active_note: String,
+    /// Libelles partages avec `MePage` (cf. `MeLabels`).
+    pub labels: MeLabels,
 }
 
 impl MeInnerPartial {
     pub(crate) fn new(base: Base, user: UserView, t: &impl Fn(&str) -> String) -> Self {
-        let labels = MeLabels::load(t);
         Self {
             base,
             user,
-            t_role_client: labels.role_client,
-            t_profile: labels.profile,
-            t_username: labels.username,
-            t_username_note: labels.username_note,
-            t_change_username: labels.change_username,
-            t_password_title: labels.password_title,
-            t_password_note: labels.password_note,
-            t_current_password: labels.current_password,
-            t_new_password: labels.new_password,
-            t_change_password: labels.change_password,
-            t_totp_title: labels.totp_title,
-            t_totp_enabled: labels.totp_enabled,
-            t_totp_disabled: labels.totp_disabled,
-            t_totp_setup: labels.totp_setup,
-            t_totp_remove: labels.totp_remove,
-            t_totp_active_note: labels.totp_active_note,
+            labels: MeLabels::load(t),
         }
     }
 }
