@@ -63,7 +63,7 @@ No auth. Version, setup state, feature flags (`release` is always `null` —
 no in-process TLS client, kept for v15 shape parity).
 
 ```json
-{ "version": "0.1.0", "setup": false, "setupStep": 0, "insecure": true,
+{ "version": "0.2.0", "setup": false, "setupStep": 0, "insecure": true,
   "metricsPrometheus": false, "oauthEnabled": false, "release": null }
 ```
 
