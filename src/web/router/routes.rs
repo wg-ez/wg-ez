@@ -7,14 +7,16 @@ use axum::{
     extract::{DefaultBodyLimit, Request},
     middleware,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
 };
 use tower_http::trace::TraceLayer;
 
 use super::middleware::{csrf_guard, security_headers, setup_guard};
 use crate::web::{
     ctx::{AppState, Backend},
-    handlers::{admin, auth, client, cnf, information, metrics, session, setup, status, ui},
+    handlers::{
+        admin, api_tokens, auth, client, cnf, information, metrics, session, setup, status, ui,
+    },
 };
 
 /// Maximum request body size, applied uniformly to every route through
@@ -104,6 +106,13 @@ fn api_routes<B: Backend>() -> Router<AppState<B>> {
         .route("/me/username", post(session::change_username))
         .route("/me/password", post(session::change_password))
         .route("/me/totp", post(session::totp))
+        .route(
+            "/me/tokens",
+            get(api_tokens::list_mine).post(api_tokens::create_mine),
+        )
+        .route("/me/tokens/{id}", delete(api_tokens::delete_mine))
+        .route("/admin/tokens", get(api_tokens::list_all))
+        .route("/admin/tokens/{id}", delete(api_tokens::delete_any))
         .route("/client", get(client::list).post(client::create))
         .route(
             "/client/{id}",

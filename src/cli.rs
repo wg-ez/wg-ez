@@ -4,13 +4,19 @@
 //! when the web server is broken.
 //!
 //! - `db:admin:reset` sets a new 12+ char password for admin id 1, clears
-//!   `totpKey`/`totpVerified` and revokes every existing session (v15 prompts
-//!   when `--password` is absent; here one stdin line is read instead).
+//!   `totpKey`/`totpVerified` and revokes every existing session **and every
+//!   long-lived API token** (same rotation semantics as the web password
+//!   change; v15 prompts when `--password` is absent, here one stdin line is
+//!   read instead).
 //! - `clients:list` prints id, name, public key and state.
 //! - `clients:qr <id>` prints the client `.conf` as a terminal
 //!   QR (half-block renderer, maison). The payload reuses the canonical
 //!   [`crate::web::backend::build_client_conf`] — the exact resolution behind
 //!   the SVG QR and `/cnf/*` download — so both stay in sync by construction.
+//! - `api-tokens:list [--user <username>]` lists long-lived API tokens
+//!   (never the clear value nor the hash: id, owner, name, expiry,
+//!   last use, creation, state).
+//! - `api-tokens:revoke <id>` revokes (deletes) an API token by id.
 //!
 //! No `clap`/`citty`: hand-rolled parsing keeps the binary small. Never
 //! touches WireGuard: CLI mutations are DB-only by design.
@@ -69,12 +75,18 @@ pub enum CliCommand {
     ClientsList,
     /// Terminal QR for a client.
     ClientsQr { id: i64 },
+    /// List API tokens, optionally filtered by owner username.
+    ApiTokensList { user: Option<String> },
+    /// Revoke (delete) an API token by id.
+    ApiTokensRevoke { id: i64 },
 }
 
 pub const USAGE: &str = "usage:
   wg-ez cli db:admin:reset [--username <name>] [--password <password>]
   wg-ez cli clients:list
-  wg-ez cli clients:qr <id>";
+  wg-ez cli clients:qr <id>
+  wg-ez cli api-tokens:list [--user <username>]
+  wg-ez cli api-tokens:revoke <id>";
 
 fn usage_error() -> CliError {
     CliError::Usage(USAGE.to_string())
@@ -124,6 +136,35 @@ pub fn parse_cli_args(args: &[String]) -> Result<CliCommand, CliError> {
                 id: id.ok_or_else(usage_error)?,
             })
         }
+        "api-tokens:list" => {
+            let mut user = None;
+            let mut it = rest.iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "--user" => {
+                        user = Some(it.next().ok_or_else(usage_error)?.to_string());
+                    }
+                    _ => return Err(usage_error()),
+                }
+            }
+            Ok(CliCommand::ApiTokensList { user })
+        }
+        "api-tokens:revoke" => {
+            let mut id: Option<i64> = None;
+            for a in rest {
+                if id.is_none() {
+                    id = Some(
+                        a.parse::<i64>()
+                            .map_err(|_| CliError::Usage(format!("bad token id: {a}")))?,
+                    );
+                } else {
+                    return Err(usage_error());
+                }
+            }
+            Ok(CliCommand::ApiTokensRevoke {
+                id: id.ok_or_else(usage_error)?,
+            })
+        }
         _ => Err(usage_error()),
     }
 }
@@ -145,6 +186,8 @@ pub fn run_offline(db_path: &Path, cmd: &CliCommand) -> Result<String, CliError>
         }
         CliCommand::ClientsList => list_clients(&conn),
         CliCommand::ClientsQr { id } => qr_for_client(&conn, *id),
+        CliCommand::ApiTokensList { user } => list_api_tokens(&conn, user.as_deref()),
+        CliCommand::ApiTokensRevoke { id } => revoke_api_token(&conn, *id),
     }
 }
 
@@ -191,14 +234,17 @@ pub fn reset_admin(
         )?;
         crate::store::user::set_totp(conn, 1, None, false)?;
         // Parité avec le changement de mot de passe web : un token volé avant
-        // le reset ne doit pas survivre à la rotation.
+        // le reset ne doit pas survivre à la rotation — sessions ET jetons
+        // d'API longue durée.
         crate::store::session::delete_for_user(conn, 1)?;
+        crate::store::api_token::delete_for_user(conn, 1)?;
         Ok(format!("Successfully updated admin user 1 ({u})\n"))
     } else {
         crate::store::user::set_password_hash(conn, 1, Some(hash.as_str()))?;
         crate::store::user::set_totp(conn, 1, None, false)?;
         // Parité avec le changement de mot de passe web (cf. branche ci-dessus).
         crate::store::session::delete_for_user(conn, 1)?;
+        crate::store::api_token::delete_for_user(conn, 1)?;
         Ok(format!(
             "Successfully updated admin user 1 ({})\n",
             current.username
@@ -259,6 +305,70 @@ pub fn qr_for_client(conn: &rusqlite::Connection, id: i64) -> Result<String, Cli
         crate::web::backend::build_client_conf(conn, &client, disable_v4, disable_v6)
             .map_err(|e| CliError::Render(e.to_string()))?;
     qr_to_terminal(&text)
+}
+
+// ---------------------------------------------------------------------------
+// API tokens (DB-only, jamais WireGuard)
+// ---------------------------------------------------------------------------
+
+/// Liste les jetons d'API : id, propriétaire, nom, expiration,
+/// dernière utilisation, création, état. Ni le clair (jamais stocké) ni le
+/// hash ne sont affichés. `--user` filtre par nom de connexion.
+pub fn list_api_tokens(
+    conn: &rusqlite::Connection,
+    user: Option<&str>,
+) -> Result<String, CliError> {
+    let rows = if let Some(username) = user {
+        let Some(owner) = crate::store::user::get_by_username(conn, username.trim())? else {
+            return Err(CliError::NotFound(format!("user '{username}' not found")));
+        };
+        crate::store::api_token::list_for_user(conn, owner.id)?
+    } else {
+        crate::store::api_token::list_all(conn)?
+    };
+    if rows.is_empty() {
+        return Ok("No API tokens found\n".to_string());
+    }
+    let mut names: std::collections::HashMap<i64, String> = std::collections::HashMap::new();
+    for row in &rows {
+        if let std::collections::hash_map::Entry::Vacant(e) = names.entry(row.user_id) {
+            let label = crate::store::user::get(conn, row.user_id)?
+                .map(|u| u.username)
+                .unwrap_or_else(|| format!("#{}", row.user_id));
+            e.insert(label);
+        }
+    }
+    let mut out = format!(
+        "{:<5} {:<16} {:<24} {:<20} {:<20} {:<20} {}\n",
+        "ID", "USER", "NAME", "EXPIRES", "LAST_USED", "CREATED", "ENABLED"
+    );
+    for row in rows {
+        let owner = names.get(&row.user_id).cloned().unwrap_or_default();
+        out.push_str(&format!(
+            "{:<5} {:<16} {:<24} {:<20} {:<20} {:<20} {}\n",
+            row.id,
+            owner,
+            row.name,
+            row.expires_at.as_deref().unwrap_or("never"),
+            row.last_used_at.as_deref().unwrap_or("never"),
+            row.created_at,
+            if row.enabled { "yes" } else { "no" }
+        ));
+    }
+    Ok(out)
+}
+
+/// Révoque (supprime) un jeton d'API par id. DB-only, aucun effet WireGuard.
+pub fn revoke_api_token(conn: &rusqlite::Connection, id: i64) -> Result<String, CliError> {
+    if id < 0 {
+        return Err(CliError::Usage(format!("bad token id: {id}")));
+    }
+    if !crate::store::api_token::delete(conn, id)? {
+        return Err(CliError::NotFound(format!(
+            "API token with ID {id} not found"
+        )));
+    }
+    Ok(format!("Successfully revoked API token {id}\n"))
 }
 
 // ---------------------------------------------------------------------------
@@ -443,5 +553,64 @@ mod tests {
         let qr = qr_for_client(&conn, 1).expect("qr");
         assert!(qr.chars().any(|c| c == '█'));
         assert!(qr_for_client(&conn, 999).is_err());
+    }
+
+    #[test]
+    fn api_tokens_parse_list_and_revoke_offline() {
+        assert_eq!(
+            parse_cli_args(&["api-tokens:list".to_string()]).expect("list"),
+            CliCommand::ApiTokensList { user: None }
+        );
+        assert_eq!(
+            parse_cli_args(&[
+                "api-tokens:list".to_string(),
+                "--user".to_string(),
+                "bob".to_string()
+            ])
+            .expect("list user"),
+            CliCommand::ApiTokensList {
+                user: Some("bob".to_string())
+            }
+        );
+        assert_eq!(
+            parse_cli_args(&["api-tokens:revoke".to_string(), "7".to_string()]).expect("revoke"),
+            CliCommand::ApiTokensRevoke { id: 7 }
+        );
+        assert!(parse_cli_args(&["api-tokens:revoke".to_string()]).is_err());
+        assert!(parse_cli_args(&["api-tokens:list".to_string(), "extra".to_string()]).is_err());
+
+        let conn = cli_memdb();
+        assert!(
+            list_api_tokens(&conn, None)
+                .expect("empty")
+                .contains("No API tokens")
+        );
+        let clear = "clear-ci-token-value-12345";
+        let id = crate::store::api_token::create(
+            &conn,
+            1,
+            "ci",
+            &crate::store::api_token::hash_token(clear),
+            Some("2999-01-01T00:00:00Z"),
+            "2026-01-01T00:00:00Z",
+        )
+        .expect("seed token");
+        let list = list_api_tokens(&conn, None).expect("list");
+        assert!(list.contains("ci"));
+        // Ni le clair ni le hash ne fuient dans la sortie.
+        assert!(!list.contains(clear));
+        assert!(!list.contains(&crate::store::api_token::hash_token(clear)));
+        // Filtre par utilisateur, inconnu -> NotFound.
+        assert!(
+            list_api_tokens(&conn, Some("admin"))
+                .expect("filter")
+                .contains("ci")
+        );
+        assert!(list_api_tokens(&conn, Some("nobody")).is_err());
+        // Révocation : message, puis idempotent-> NotFound.
+        let out = revoke_api_token(&conn, id).expect("revoke");
+        assert!(out.contains(&id.to_string()));
+        assert!(revoke_api_token(&conn, id).is_err());
+        assert!(revoke_api_token(&conn, -1).is_err());
     }
 }

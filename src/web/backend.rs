@@ -6,7 +6,8 @@
 //! `common` (shared helpers: error mapping, `spawn_blocking` runner, view
 //! builders, client `.conf` rendering, [`load_snapshot`], [`generate_keypair`],
 //! patch validation), `auth` (password / session / "me" / TOTP), `clients`
-//! (CRUD), `otl` (one-time links), `admin` (general / hooks / interface /
+//! (CRUD), `otl` (one-time links), `api_tokens` (long-lived Bearer tokens),
+//! `admin` (general / hooks / interface /
 //! userconfig / CIDR / restart / ip-info), `metrics` (snapshots + Bearer
 //! check), `setup` (setup steps + meta queries).
 //!
@@ -25,6 +26,7 @@
 //!   by [`crate::web::guards::hash_token`]) is persisted.
 
 mod admin;
+mod api_tokens;
 mod auth;
 mod clients;
 mod common;
@@ -61,8 +63,8 @@ use serde_json::{Value, json};
 use crate::config::AppConfig;
 use crate::tunnel::Tunnel;
 use crate::web::ctx::{
-    Backend, ClientView, GlobalDefaults, LoginOutcome, MetricsSnapshot, OtlOutcome, OtlView,
-    StatusSignal, TotpSetup, UserView, WebError,
+    ApiTokenCreated, ApiTokenView, Backend, ClientView, GlobalDefaults, LoginOutcome,
+    MetricsSnapshot, OtlOutcome, OtlView, StatusSignal, TotpSetup, UserView, WebError,
 };
 use crate::wg::runner::SystemRunner;
 
@@ -227,7 +229,6 @@ impl Backend for SqliteBackend {
         fn create_session(user_id: i64) -> Result<String, WebError> => create_session_inner;
         fn lookup_session(token_hash_hex: &str) -> Result<Option<UserView>, WebError> => lookup_session_inner;
         fn destroy_session(token_hash_hex: &str) -> Result<(), WebError> => destroy_session_inner;
-        fn login_basic(username: &str, password: &str) -> Result<Option<UserView>, WebError> => login_basic_inner;
 
         // -- me ------------------------------------------------------------
         fn update_me(user_id: i64, name: &str) -> Result<UserView, WebError> => update_me_inner;
@@ -253,6 +254,13 @@ impl Backend for SqliteBackend {
 
         // -- one-time links (public download) ------------------------------
         fn consume_otl(token: &str) -> Result<OtlOutcome, WebError> => consume_otl_inner;
+
+        // -- api tokens (long-lived Bearer credentials, DB-only) -----------
+        fn create_api_token(user_id: i64, name: &str, expires_at: Option<&str>) -> Result<ApiTokenCreated, WebError> => create_api_token_inner;
+        fn list_api_tokens(user_id: i64) -> Result<Vec<ApiTokenView>, WebError> => list_api_tokens_inner;
+        fn list_all_api_tokens() -> Result<Vec<ApiTokenView>, WebError> => list_all_api_tokens_inner;
+        fn delete_api_token(caller_id: i64, is_admin: bool, id: i64) -> Result<bool, WebError> => delete_api_token_inner;
+        fn auth_api_token(token_hash_hex: &str) -> Result<Option<UserView>, WebError> => auth_api_token_inner;
 
         // -- admin ---------------------------------------------------------
         fn get_general() -> Result<Value, WebError> => get_general_inner;

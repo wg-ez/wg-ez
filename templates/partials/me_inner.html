@@ -3,9 +3,17 @@
    dans `#me-page`) et le refresh partiel (`MeInnerPartial`, renvoye par
    `GET /me` aux appelants htmx). Meme motif que `partials/grid.html`. Ne
    reference que des champs presents dans `MePage` ET `MeInnerPartial`
-   (`base`, `user`, `labels`).
+   (`base`, `user`, `labels`, `tokens`, `tokens_count`).
 
-   Bandeau d'identite via `ui::hero` (titre + `.row` de `pill`/`pill2`,
+   Jetons d'API : compteur « X API tokens » en chapeau `.hud` a droite du
+   titre (`tokens_count`, meme emplacement/police que le username de
+   « Profile ») au lieu d'un etat vide texte : lignes denses (nom en gras + faits en texte courant sur une
+   seule ligne, sans carte ni pastille) + formulaire de création (`hx-post`,
+   `hx-swap="none"`, le clair part dans le trigger `showToken` vers la
+   modale globale `app.js`) + révocation (`hx-delete`, `hx-swap="none"` +
+   trigger `refreshMe`). Zéro JS inline. #}
+
+   {# Bandeau d'identite via `ui::hero` (titre + `.row` de `pill`/`pill2`,
    `2FA` restant un invariant technique identique EN/FR, comme
    `wg-ez`/`GitHub`). Tetes via `ui::phead`, champs via
    `ui::field`, envois via `ui::submit`, queue de filets via
@@ -81,4 +89,51 @@
     <div id="totp-slot"></div>
   </aside>
 </div>
+
+<section class="panel" id="api-tokens">
+  {{ ui::phead(labels.tokens_title, tokens_count) }}
+  {{ ui::note(labels.tokens_note) }}
+  {% if !tokens.is_empty() %}
+    {# UNE ligne de grille par jeton (`ul.stack` : filets entre lignes, comme
+       les panneaux empiles) : `li.trow` en grille a colonnes fixes (nom en
+       `strong` + 3 valeurs en `.trow__v.num` mono tabulaires + bouton pousse
+       a droite), donc dates alignees verticalement d'une ligne a l'autre ;
+       chaque valeur voyage avec son libelle (`.trow__cell` + `.trow__lab`,
+       `contents`/masque en desktop pour ne pas perturber les pistes) pour
+       un mobile propre : nom pleine largeur, un fait etiquete par ligne,
+       bouton en bas a droite. La ligne de tete (`trow--head`, `aria-hidden`)
+       porte les memes pistes en `.hud` PLUS un fantome du bouton
+       (`trow__ghost`, `visibility: hidden`) : sans lui la piste `auto`
+       vaudrait 0 dans l'en-tete contre la largeur du bouton dans les lignes,
+       et toutes les pistes `fr` seraient decalees. Tete masquee <40rem. Révocation
+       via `ui::mutate` (`hx-delete`, `hx-swap="none"`, le trigger
+       `refreshMe` vient de la réponse `DELETE`). Ni carte, ni pastille, ni
+       `dl.kv` : les dates restent pré-formatées `JJ-MM-AAAA` côté Rust
+       (`TokenRow`, `None` -> `tokens_never`). Pas de `<table>` : l'app n'a
+       aucun pattern de tableau (faits = `dl.kv`), la grille fixe aligne sans
+       nouveau composant. #}
+    <ul class="stack">
+      <li class="trow trow--head" aria-hidden="true"><span class="hud">{{ labels.tokens_name }}</span><span class="hud">{{ labels.tokens_created }}</span><span class="hud">{{ labels.tokens_expires_col }}</span><span class="hud">{{ labels.tokens_last_used }}</span><span class="btn btn--danger trow__ghost" aria-hidden="true">{{ labels.tokens_revoke }}</span></li>
+      {% for t in tokens %}
+        <li class="trow">
+          <strong>{{ t.name }}</strong>
+          <span class="trow__cell"><span class="hud trow__lab">{{ labels.tokens_created }}</span><span class="trow__v num">{{ t.created }}</span></span>
+          <span class="trow__cell"><span class="hud trow__lab">{{ labels.tokens_expires_col }}</span><span class="trow__v num">{{ t.expires }}</span></span>
+          <span class="trow__cell"><span class="hud trow__lab">{{ labels.tokens_last_used }}</span><span class="trow__v num">{{ t.last_used }}</span></span>
+          {{ ui::mutate(labels.tokens_revoke, "danger", true, "/api/me/tokens/" ~ t.id) }}
+        </li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+  {# Création : le formulaire ne swap rien (`hx-swap="none"`, corps ignoré) ;
+     la réponse porte `refreshMe` (la liste se met à jour) + `showToken` (le
+     clair, ASCII seul) qu'`app.js` affiche dans la modale globale (titre +
+     valeur + consigne + bouton Copier lus dans les `data-t-*` ci-dessous,
+     donc traduits sans texte en dur côté JS). #}
+  <form class="form" id="token-form" hx-post="/api/me/tokens" hx-swap="none" data-t-title="{{ labels.tokens_new_token }}" data-t-token="{{ labels.tokens_token }}" data-t-warning="{{ labels.tokens_shown_once }}" data-t-copy="{{ labels.tokens_copy }}" data-t-copied="{{ labels.tokens_copied }}">
+    {{ ui::field(labels.tokens_name, "text", "name", "", "", "1", "", "", "64", false, true) }}
+    {{ ui::field(labels.tokens_expires, "text", "expiresAt", "", "", "", "", "", "", false, false, placeholder = labels.tokens_expires_ph) }}
+    {{ ui::submit(labels.tokens_create, false) }}
+  </form>
+</section>
 {{ ui::tail(true, "") }}

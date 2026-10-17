@@ -17,15 +17,9 @@ use serde_json::{Value, json};
 
 use crate::web::{
     ctx::{AppState, Backend, WebError},
+    guards::bearer_credential,
     metrics_dto::{MetricsJson, render_prometheus},
 };
-
-fn bearer(headers: &HeaderMap) -> Option<String> {
-    let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let tok = raw.strip_prefix("Bearer ")?;
-    let tok = tok.trim();
-    (!tok.is_empty()).then(|| tok.to_owned())
-}
 
 /// v15 order (verified from `defineMetricsHandler`): the Bearer password
 /// is checked FIRST (401 when missing/wrong while `metricsPassword` is
@@ -50,7 +44,7 @@ async fn guard<B: Backend>(
     }
     if !state
         .backend
-        .metrics_check(bearer(headers).as_deref())
+        .metrics_check(bearer_credential(headers).as_deref())
         .await?
     {
         state.limits.record_metrics_failure(ip).await;

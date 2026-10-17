@@ -96,10 +96,10 @@ pub struct RateLimits {
     /// be throttled.
     metrics: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
     setup: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
-    /// Basic-auth **failures** only: successes are never recorded because
-    /// Basic is sent on every API request and a legitimate polling client
-    /// must never be throttled.
-    basic: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+    /// Bearer-credential **failures** only: successes are never recorded
+    /// because the token is sent on every API request and a legitimate
+    /// polling client must never be throttled.
+    credential: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
     /// Authenticated tunnel **mutations** (client/admin POST|DELETE that run a
     /// full `Tunnel::apply`: `render` + conf write + `wg syncconf` + firewall
     /// rebuild). Independent from every other bucket.
@@ -308,20 +308,20 @@ impl RateLimits {
         Self::check(&self.setup, ip, 20, Duration::from_secs(60)).await
     }
 
-    /// Basic-auth **failure** pre-check: `false` when the IP already hit
-    /// 10 failures/min, `true` otherwise. **Records nothing**, so successes
-    /// (every API request from a legitimate client) can never saturate it;
-    /// call it before the expensive Argon2 verification to refuse early with
-    /// 429, then call [`Self::record_basic_failure`] only when the credentials
-    /// are wrong.
-    pub async fn check_basic(&self, ip: IpAddr) -> bool {
-        !Self::saturated(&self.basic, &ip, 10, Duration::from_secs(60)).await
+    /// Bearer-credential **failure** pre-check: `false` when the IP already
+    /// hit 10 failures/min, `true` otherwise. **Records nothing**, so
+    /// successes (every API request from a legitimate client) can never
+    /// saturate it; call it before the token lookup to refuse early with
+    /// 429, then call [`Self::record_credential_failure`] only when the
+    /// credential is wrong.
+    pub async fn check_credential(&self, ip: IpAddr) -> bool {
+        !Self::saturated(&self.credential, &ip, 10, Duration::from_secs(60)).await
     }
 
-    /// Record one Basic-auth failure (10/min/IP, same policy as the login
-    /// bucket but **independent** from it).
-    pub async fn record_basic_failure(&self, ip: IpAddr) {
-        Self::record(&self.basic, ip, Duration::from_secs(60)).await;
+    /// Record one Bearer-credential failure (10/min/IP, same policy as the
+    /// login bucket but **independent** from it).
+    pub async fn record_credential_failure(&self, ip: IpAddr) {
+        Self::record(&self.credential, ip, Duration::from_secs(60)).await;
     }
 
     /// Authenticated tunnel-mutation bound: [`MUTATE_MAX`] (120/min/IP).
@@ -331,7 +331,7 @@ impl RateLimits {
     /// render + conf write + `wg syncconf` + firewall rebuild path on the
     /// single-threaded runtime. The OTL generation is the single mutation
     /// deliberately **not** covered (it has no kernel effect). The bucket is
-    /// independent from `login`, `cnf`, `metrics`, `setup` and `basic`.
+    /// independent from `login`, `cnf`, `metrics`, `setup` and `credential`.
     pub async fn check_mutation(&self, ip: IpAddr) -> bool {
         Self::check(&self.mutate, ip, MUTATE_MAX, Duration::from_secs(60)).await
     }
@@ -555,39 +555,39 @@ mod tests {
         );
     }
 
-    /// The Basic bucket counts **failures only**: the pre-check never records,
-    /// so a legitimate API client (repeated pre-checks) is never throttled,
-    /// while ten recorded failures deny the 11th pre-check. It is independent
-    /// from `login` and `metrics`.
+    /// The credential bucket counts **failures only**: the pre-check never
+    /// records, so a legitimate API client (repeated pre-checks) is never
+    /// throttled, while ten recorded failures deny the 11th pre-check. It
+    /// is independent from `login` and `metrics`.
     #[tokio::test]
-    async fn basic_failures_throttle_successes_do_not() {
+    async fn credential_failures_throttle_successes_do_not() {
         let rl = RateLimits::default();
         let ip: IpAddr = "9.9.9.9".parse().unwrap();
         // Pre-checks alone never fill the bucket (successes are not recorded).
         for _ in 0..50 {
-            assert!(rl.check_basic(ip).await);
+            assert!(rl.check_credential(ip).await);
         }
         // Ten failures saturate the bucket: the 11th pre-check is denied.
         for _ in 0..10 {
-            rl.record_basic_failure(ip).await;
+            rl.record_credential_failure(ip).await;
         }
         assert!(
-            !rl.check_basic(ip).await,
-            "11th basic failure must be denied"
+            !rl.check_credential(ip).await,
+            "11th credential failure must be denied"
         );
         // Independent from the login / metrics buckets and from other IPs.
         assert!(rl.check_login_ip(ip).await);
         assert!(rl.check_login_user(ip, "alice").await);
         assert!(!rl.metrics_saturated(ip).await);
         let other: IpAddr = "9.9.9.10".parse().unwrap();
-        assert!(rl.check_basic(other).await);
+        assert!(rl.check_credential(other).await);
     }
 
     /// The metrics bucket counts **failed** Bearer checks only: the pre-check
     /// never records, so a working scraper (repeated pre-checks with the right
     /// token) is never throttled, while thirty recorded failures saturate the
     /// bucket and deny the next pre-check. It is independent from `login`
-    /// and `basic`. This is the CPU-DoS guard: the pre-check runs BEFORE the
+    /// and `credential`. This is the CPU-DoS guard: the pre-check runs BEFORE the
     /// expensive Argon2 verification.
     #[tokio::test]
     async fn metrics_failures_throttle_successes_do_not() {
@@ -605,10 +605,10 @@ mod tests {
             rl.metrics_saturated(ip).await,
             "31st metrics auth attempt must be refused"
         );
-        // Independent from the login / basic buckets and from other IPs.
+        // Independent from the login / credential buckets and from other IPs.
         assert!(rl.check_login_ip(ip).await);
         assert!(rl.check_login_user(ip, "alice").await);
-        assert!(rl.check_basic(ip).await);
+        assert!(rl.check_credential(ip).await);
         let other: IpAddr = "9.9.9.7".parse().unwrap();
         assert!(!rl.metrics_saturated(other).await);
     }
@@ -633,7 +633,7 @@ mod tests {
         assert!(rl.check_login_user(ip, "alice").await);
         assert!(rl.check_setup(ip).await);
         assert!(rl.check_cnf(ip).await);
-        assert!(rl.check_basic(ip).await);
+        assert!(rl.check_credential(ip).await);
         let other: IpAddr = "7.7.7.8".parse().unwrap();
         assert!(rl.check_mutation(other).await);
     }

@@ -48,6 +48,14 @@ Offline access, direct SQLite, never touches WireGuard:
 docker exec -it wg-ez wg-ez cli db:admin:reset
 docker exec -it wg-ez wg-ez cli clients:list
 docker exec -it wg-ez wg-ez cli clients:qr <id>
+docker exec -it wg-ez wg-ez cli api-tokens:list [--user <username>]
+docker exec -it wg-ez wg-ez cli api-tokens:revoke <id>
 ```
 
 Run `docker exec -it wg-ez wg-ez cli --help` for the full list.
+
+`db:admin:reset` forces a new password on admin (id 1), clears its 2FA and
+**revokes every session and every API token of that account** — the same
+rotation semantics as `POST /api/me/password`. Any automation still using a
+`Bearer` token must be re-issued afterwards (`api-tokens:list` to audit,
+`api-tokens:revoke` to drop one by id).

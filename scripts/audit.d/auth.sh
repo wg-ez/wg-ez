@@ -42,9 +42,9 @@ chk "F02 DELETE /api/session sans auth 401" "$g" "ok" #check
 c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H 'Cookie: wg-ez=garbage' "$BASE/api/session" 2>/dev/null || echo "000")
 inset "$c" 401 && g=ok || g="status=$c"
 chk "F03 cookie wg-ez invalide 401" "$g" "ok" #check
-c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -u ':' "$BASE/api/session" 2>/dev/null || echo "000")
+c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H 'Authorization: Bearer' "$BASE/api/session" 2>/dev/null || echo "000")
 inset "$c" 401 && g=ok || g="status=$c"
-chk "F04 Basic sans credentials 401" "$g" "ok" #check
+chk "F04 Bearer sans token 401" "$g" "ok" #check
 chk "F05 POST /api/session rejeté" "$(sok /api/session 401 404 405)" "ok" #check
 chk "F06 PUT /api/session rejeté" "$(sok /api/session 401 404 405)" "ok" #check
 ct=$(gct /api/session); has "$ct" "application/json" && g=ok || g="ct=$ct"

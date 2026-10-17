@@ -48,6 +48,6 @@ pub use forms::{
 pub use locales::{Locales, SUPPORTED_LANGS};
 pub use state::{AppState, PendingLogin, RateLimits, insert_pending};
 pub use views::{
-    ClientView, GlobalDefaults, Kv, LoginOutcome, MetricsSnapshot, OtlOutcome, OtlView, PeerMetric,
-    Principal, TotpSetup, UserView,
+    ApiTokenCreated, ApiTokenView, ClientView, GlobalDefaults, Kv, LoginOutcome, MetricsSnapshot,
+    OtlOutcome, OtlView, PeerMetric, Principal, TotpSetup, UserView,
 };

@@ -146,6 +146,7 @@ pub(crate) fn filter_and_sort_clients(
 }
 
 pub mod admin;
+pub mod api_tokens;
 pub mod auth;
 pub mod client;
 pub mod cnf;

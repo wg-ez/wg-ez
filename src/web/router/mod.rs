@@ -10,8 +10,8 @@
 //! inline script/style), and the setup-guard redirect (`/setup/<step>` while
 //! unfinished).
 //!
-//! Auth: `wg-ez` cookie or `Authorization: Basic` (refused when 2FA is
-//! active); the public and setup-only routes are enumerated in [`routes`].
+//! Auth: `wg-ez` cookie or `Authorization: Bearer <api-token>`; the public
+//! and setup-only routes are enumerated in [`routes`].
 //!
 //! Layout: [`routes`] (route tables + [`build_router`](routes::build_router)),
 //! [`middleware`] (CSP headers, setup guard), [`tests`] (guard tests via the

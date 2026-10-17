@@ -443,6 +443,98 @@
     min-width: 0;
   }
 
+  /* Jetons d'API (`/me`, `ul.stack` de `me_inner.html`) : grille a colonnes
+     fixes — nom en `strong` (sans courant) + 3 valeurs en `.trow__v.num`
+     (mono tabulaire, comme `dd`) + bouton pousse a droite, donc dates
+     alignees verticalement d'une ligne a l'autre ; chaque valeur voyage avec
+     son libelle (`.trow__cell` en `contents` + `.trow__lab` masque : grille
+     inchangee), pour un mobile propre (nom pleine largeur, un fait etiquete
+     par ligne, bouton en bas a droite). La ligne de tete (`trow--head`)
+     porte les memes pistes en `.hud` (mono eyebrow, comme les `span.hud`
+     des `flabel`) PLUS un fantome du bouton (`trow__ghost`,
+     `visibility: hidden`) qui donne a la piste `auto` la meme largeur que
+     dans les lignes. Le `btn` est reduit (2.25rem) : la boite 3rem
+     des formulaires ecraserait la ligne. Mobile (<40rem) : voir le bloc
+     `@media` ci-dessous. */
+  .trow {
+    display: grid;
+    grid-template-columns: minmax(7rem, 1.4fr) repeat(3, minmax(0, 1fr)) auto;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    padding-block: 0.75rem;
+  }
+  .trow strong {
+    min-width: 0;
+    font-size: 0.875rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .trow__v {
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--ink-strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Enveloppe valeur + libellé : transparente en desktop (`contents`, la
+     grille voit directement nom/valeurs/bouton), rangée étiquetée en
+     mobile (`trow__lab` masqué ici, affiché sous 40rem). */
+  .trow__cell {
+    display: contents;
+  }
+  .trow__lab {
+    display: none;
+  }
+  .trow .btn {
+    flex: none;
+    height: 2.25rem;
+    padding-inline: 1rem;
+    margin-left: auto;
+  }
+  /* Fantome de la ligne de tete : meme boite que le bouton RÉVOQUER (même
+     label, mêmes classes) mais invisible — la piste `auto` calcule ainsi la
+     même largeur dans l'en-tête que dans les lignes, et les 5 pistes `fr`
+     partent du même bord. `visibility` (et non `display`) conserve la place
+     tout en sortant le doublon du clavier et du clic. */
+  .trow--head .trow__ghost {
+    visibility: hidden;
+  }
+  @media (max-width: 39.999rem) {
+    .trow--head {
+      display: none;
+    }
+    /* Mobile : nom pleine largeur, puis un fait étiqueté par ligne
+       (libellé `.hud` à gauche, valeur à droite), bouton en bas à droite.
+       Plus de valeurs orphelines ni de ligne à moitié vide. */
+    .trow {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 0.5rem;
+    }
+    .trow strong {
+      white-space: normal;
+    }
+    .trow__cell {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 1rem;
+      min-width: 0;
+    }
+    .trow__lab {
+      display: block;
+      flex: none;
+    }
+    .trow__cell .trow__v {
+      text-align: right;
+    }
+    .trow .btn {
+      justify-self: end;
+    }
+  }
+
   .tick {
     position: absolute;
     width: 11px;
@@ -1669,6 +1761,19 @@
     font-family: var(--font-mono);
     font-size: 0.75rem;
     letter-spacing: 0.05em;
+  }
+  /* Toasts pendant qu'une modale est ouverte : la `<dialog>` en `showModal`
+     vit dans la top layer (aucun `z-index` de l'arbre normal ne passe
+     au-dessus de son `::backdrop` floute) — le conteneur est donc créé DANS
+     le dialogue par `T()` (`app.js`), en fixe viewport comme `.toasts`. */
+  .toasts--modal {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
   /* une seule <dialog> native ; corps rempli par app.js */

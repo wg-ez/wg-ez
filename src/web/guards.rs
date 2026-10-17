@@ -1,16 +1,20 @@
 #![forbid(unsafe_code)]
 
-//! Auth guards: session cookie / Basic Auth + permission checks.
+//! Auth guards: session cookie / API-token Bearer + permission checks.
 //!
-//! - Auth source: `wg-ez` session cookie (via `axum-extra` `CookieJar`)
-//!   or `Authorization: Basic` `user:pass` (base64). Basic is refused when
-//!   the account has 2FA active (`totpVerified`), so 2FA cannot be bypassed
-//!   via API. A wrong password and a correct password on a 2FA account are
-//!   answered **identically** (`401` + `Security failure type=password`), so
-//!   Basic is never a password-validity oracle.
-//! - Basic **failures** are throttled at 10/min/IP (successes are never
-//!   counted: Basic rides on every API request and a polling client must not
-//!   be throttled). At the limit the request is refused `429` before Argon2.
+//! - Auth source: `wg-ez` session cookie (via `axum-extra` `CookieJar`), or
+//!   `Authorization: Bearer` `<api-token>` (long-lived token created under
+//!   `/api/me/tokens`; only its SHA-256 hex is stored). There is no password
+//!   fallback on API routes: automation must use explicit revocable Bearer
+//!   tokens (list/revoke under `/api/me/tokens`), never `user:pass`.
+//!   Bearer tokens stay valid on 2FA accounts (documented in `docs/api.md`).
+//!   Unknown Bearer tokens answer `401` with the same seclog (no oracle).
+//! - Bearer **failures** share the 10/min/IP throttle (successes are never
+//!   counted: the token rides on every API request and a polling client
+//!   must not be throttled). At the limit the request is refused `429` before
+//!   any DB lookup. The clear Bearer token is never logged.
+//! - The `Bearer` scheme is case-insensitive (RFC 6750 §2.1); the credential
+//!   itself is trimmed and length-capped before hashing.
 //! - Permissions: `clients.view|update|create|delete|custom`, `admin.any`,
 //!   `me.update`. ADMIN has everything; CLIENT is scoped to its own
 //!   clients/profile. Unknown permission strings -> 500 (anti-forget rule).
@@ -29,7 +33,6 @@ use axum::{
     http::{HeaderMap, header, request::Parts},
 };
 use axum_extra::extract::CookieJar;
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 
 use super::ctx::{AppState, Backend, Principal, WebError};
 
@@ -48,22 +51,28 @@ pub fn hash_token(token: &str) -> String {
     crate::auth::session::sha256_hex(token.as_bytes())
 }
 
-fn basic_credentials(headers: &HeaderMap) -> Option<(String, String)> {
+/// Bearer credential from `Authorization: <scheme> <token>`. The scheme is
+/// case-insensitive (RFC 6750 §2.1 : `Bearer`, `bearer`, …) ; returns the
+/// trimmed, non-empty token. The caller hashes it before lookup and never
+/// logs it. Shared with the metrics guard so both Bearer parsers accept the
+/// same shapes.
+pub(crate) fn bearer_credential(headers: &HeaderMap) -> Option<String> {
     let raw = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    let b64 = raw.strip_prefix("Basic ")?;
-    let decoded = B64.decode(b64.trim()).ok()?;
-    let s = String::from_utf8(decoded).ok()?;
-    let (u, p) = s.split_once(':')?;
-    Some((u.to_owned(), p.to_owned()))
+    let (scheme, token) = raw.split_once(char::is_whitespace)?;
+    if !scheme.eq_ignore_ascii_case("bearer") {
+        return None;
+    }
+    let token = token.trim();
+    (!token.is_empty()).then(|| token.to_owned())
 }
 
-/// Resolve the request principal: session cookie first, Basic fallback.
-/// Missing/invalid credentials -> 401; backend failure -> 500.
+/// Resolve the request principal: session cookie first, then Bearer API
+/// token. Missing/invalid credentials -> 401; backend failure -> 500.
 ///
-/// `ip` is the trusted-proxy-aware client IP used to throttle Basic
-/// **failures**. It is optional so a caller without `ConnectInfo` (e.g. a
-/// direct unit call) **fails open** — no throttling — instead of refusing a
-/// legitimate request.
+/// `ip` is the trusted-proxy-aware client IP used to throttle Bearer
+/// credential failures. It is optional so a caller without `ConnectInfo`
+/// (e.g. a direct unit call) **fails open** — no throttling — instead of
+/// refusing a legitimate request.
 pub async fn authenticate<B: Backend>(
     state: &AppState<B>,
     jar: &CookieJar,
@@ -89,30 +98,33 @@ pub async fn authenticate<B: Backend>(
             Err(e) => return Err(e),
         }
     }
-    // 2. Basic Auth fallback (refused when 2FA is active on the account).
-    if let Some((user, pass)) = basic_credentials(headers) {
-        // Pre-check WITHOUT recording: refuse a saturated IP with 429 before
-        // paying for Argon2. Successes never count (Basic is sent on every
-        // API request), only failures below do.
-        if let Some(ip) = ip
-            && !state.limits.check_basic(ip).await
-        {
-            return Err(WebError::rate_limited("too many basic auth failures"));
+    // 2. Bearer API-token fallback (explicit revocable credential: valid
+    // even on 2FA accounts). Failures share the 10/min/IP credential bucket
+    // (failures only) so a Bearer flood cannot bypass the DB guard. The
+    // clear token is never logged.
+    if let Some(token) = bearer_credential(headers) {
+        if token.len() > 512 {
+            return Err(WebError::unauthorized("bad token"));
         }
-        match state.backend.login_basic(&user, &pass).await {
-            Ok(Some(u)) if !u.totp_verified => Ok(Principal {
+        if let Some(ip) = ip
+            && !state.limits.check_credential(ip).await
+        {
+            return Err(WebError::rate_limited("too many credential failures"));
+        }
+        match state.backend.auth_api_token(&hash_token(&token)).await {
+            Ok(Some(u)) => Ok(Principal {
                 user_id: u.id,
                 username: u.username,
                 role: u.role,
                 totp_verified: false,
             }),
-            // Wrong password OR correct password on a 2FA account: the same
-            // 401 + seclog, so Basic cannot be used to probe password validity.
-            Ok(Some(_)) | Ok(None) => {
+            // Unknown / revoked / expired / disabled token: 401 + seclog,
+            // so Bearer cannot probe token validity.
+            Ok(None) => {
                 if let Some(ip) = ip {
-                    state.limits.record_basic_failure(ip).await;
+                    state.limits.record_credential_failure(ip).await;
                 }
-                Err(WebError::unauthorized("bad credentials").with_seclog("password"))
+                Err(WebError::unauthorized("bad token").with_seclog("password"))
             }
             Err(e) => Err(e),
         }
@@ -158,7 +170,7 @@ pub fn check(
 }
 
 /// Axum extractor resolving the principal from the session cookie or
-/// Basic Auth. Declared BEFORE any body extractor it guarantees
+/// Bearer API token. Declared BEFORE any body extractor it guarantees
 /// "unauthenticated -> 401" even with a missing/malformed body, because
 /// axum extracts all `FromRequestParts` before the single `FromRequest`.
 pub struct Auth(pub Principal);
@@ -172,7 +184,7 @@ impl<B: Backend> FromRequestParts<AppState<B>> for Auth {
     ) -> Result<Self, Self::Rejection> {
         // Direct peer (injected by `into_make_service_with_connect_info`)
         // resolved through the trusted-proxy chain. Missing `ConnectInfo`
-        // (e.g. a direct unit call) fails open: no Basic throttling.
+        // (e.g. a direct unit call) fails open: no credential throttling.
         let direct = parts
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
@@ -239,5 +251,38 @@ mod tests {
         assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
         let e2 = check(&admin(), "", None).unwrap_err();
         assert_eq!(e2.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    /// `Authorization` scheme parsing: `Bearer` case-insensitive, exactly one
+    /// whitespace run separating scheme and credential, credential trimmed,
+    /// empty credential rejected (fail closed).
+    #[test]
+    fn bearer_credential_parses_scheme_case_insensitively() {
+        fn h(v: &str) -> HeaderMap {
+            let mut m = HeaderMap::new();
+            m.insert(header::AUTHORIZATION, v.parse().expect("header"));
+            m
+        }
+        for scheme in ["Bearer", "bearer", "BEARER", "bEaReR"] {
+            assert_eq!(
+                bearer_credential(&h(&format!("{scheme} abc123"))).as_deref(),
+                Some("abc123"),
+                "schéma {scheme}"
+            );
+            // Tabs / multiple spaces before the credential are trimmed.
+            assert_eq!(
+                bearer_credential(&h(&format!("{scheme}\t  abc123  "))).as_deref(),
+                Some("abc123")
+            );
+        }
+        // Wrong scheme, missing scheme, or empty credential -> None.
+        for value in ["Token abc123", "abc123", "Bearer", "Bearer   ", ""] {
+            assert!(
+                bearer_credential(&h(value)).is_none(),
+                "`{value}` doit être refusé"
+            );
+        }
+        // Missing header entirely.
+        assert!(bearer_credential(&HeaderMap::new()).is_none());
     }
 }

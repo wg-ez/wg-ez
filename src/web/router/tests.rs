@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use super::*;
 use crate::web::ctx::{
-    AppState, Backend, ClientView, GlobalDefaults, LoginOutcome, MetricsSnapshot, OtlOutcome,
-    OtlView, PendingLogin, StatusSignal, TotpSetup, UserView, WebError,
+    ApiTokenCreated, ApiTokenView, AppState, Backend, ClientView, GlobalDefaults, LoginOutcome,
+    MetricsSnapshot, OtlOutcome, OtlView, PendingLogin, StatusSignal, TotpSetup, UserView,
+    WebError,
 };
 use axum::{
     Router,
@@ -16,7 +17,6 @@ use axum::{
     extract::ConnectInfo,
     http::{HeaderMap, Request, StatusCode},
 };
-use base64::{Engine as _, engine::general_purpose::STANDARD as B64};
 use serde_json::Value;
 use tower::ServiceExt;
 
@@ -26,6 +26,8 @@ use tower::ServiceExt;
 /// `POST /api/admin/general` then `GET /metrics/*` shares state through the
 /// real router. `set_general` reuses the production pure merge
 /// (`crate::web::backend::general_update`) so the I6 guard is the real one.
+/// API tokens live in `api_tokens` (hashed, like production): created through
+/// the real `POST /api/me/tokens` router path, resolvable via `Bearer`.
 #[derive(Debug, Default)]
 pub struct TestBackend {
     pub setup_step: i64,
@@ -36,6 +38,13 @@ pub struct TestBackend {
     /// Test-only "stored hash": the clear Bearer itself (production stores an
     /// Argon2 hash). Router tests only need presence + comparison semantics.
     pub metrics_password: std::sync::Mutex<Option<String>>,
+    /// Long-lived API tokens: `(stored_hash, view)`. The clear value is
+    /// returned once at creation (like production) and never stored.
+    pub api_tokens: std::sync::Mutex<Vec<(String, ApiTokenView)>>,
+    /// Next API-token id (monotonic, never reused after revoke).
+    pub api_next_id: std::sync::Mutex<i64>,
+    /// User ids treated as disabled (fail-closed Bearer on disabled owner).
+    pub disabled_users: std::sync::Mutex<Vec<i64>>,
 }
 
 /// Construct a [`TestBackend`] with the given flags/password.
@@ -55,11 +64,11 @@ fn backend_with_insecure(
         insecure,
         metrics: std::sync::Mutex::new(metrics),
         metrics_password: std::sync::Mutex::new(password.map(str::to_string)),
+        api_tokens: std::sync::Mutex::new(Vec::new()),
+        api_next_id: std::sync::Mutex::new(1),
+        disabled_users: std::sync::Mutex::new(Vec::new()),
     }
 }
-
-/// Valid Basic-auth password known to [`TestBackend::login_basic`].
-const BASIC_PASSWORD: &str = "correct-horse-battery";
 
 fn admin_user() -> UserView {
     UserView {
@@ -227,22 +236,6 @@ impl Backend for TestBackend {
     async fn destroy_session(&self, _h: &str) -> Result<(), WebError> {
         Ok(())
     }
-    async fn login_basic(&self, u: &str, p: &str) -> Result<Option<UserView>, WebError> {
-        // Deterministic credentials for the Basic-auth guard tests:
-        // - `admin:<BASIC_PASSWORD>` -> valid, no 2FA;
-        // - `totp:<anything>` -> valid password on a 2FA account (must be
-        //   refused exactly like a wrong password);
-        // - anything else -> wrong credentials.
-        match (u, p) {
-            ("admin", BASIC_PASSWORD) => Ok(Some(admin_user())),
-            ("totp", _) => Ok(Some(UserView {
-                totp_enabled: true,
-                totp_verified: true,
-                ..client_user()
-            })),
-            _ => Ok(None),
-        }
-    }
     async fn update_me(&self, _u: i64, _n: &str) -> Result<UserView, WebError> {
         Ok(admin_user())
     }
@@ -391,6 +384,132 @@ impl Backend for TestBackend {
             }),
             _ => Ok(OtlOutcome::Unknown),
         }
+    }
+    async fn create_api_token(
+        &self,
+        user_id: i64,
+        name: &str,
+        expires_at: Option<&str>,
+    ) -> Result<ApiTokenCreated, WebError> {
+        // Miroir de la validation de production (nom 1-64) : le 400 est
+        // exercé via le vrai routeur.
+        let name = name.trim().to_string();
+        if name.is_empty() || name.chars().count() > 64 {
+            return Err(WebError::bad_request("token name must be 1-64 chars"));
+        }
+        let (token, stored) = crate::auth::session::generate_token_pair()
+            .map_err(|e| WebError::internal(e.to_string()))?;
+        let expires = expires_at
+            .filter(|s| !s.trim().is_empty())
+            .map(str::to_string);
+        let mut next = self
+            .api_next_id
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?;
+        let id = *next;
+        *next += 1;
+        drop(next);
+        let created_at = "2026-01-01T00:00:00Z".to_string();
+        let view = ApiTokenView {
+            id,
+            user_id,
+            name: name.clone(),
+            expires_at: expires.clone(),
+            last_used_at: None,
+            created_at: created_at.clone(),
+            enabled: true,
+        };
+        self.api_tokens
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?
+            .push((stored, view));
+        Ok(ApiTokenCreated {
+            id,
+            name,
+            token,
+            expires_at: expires,
+            created_at,
+        })
+    }
+    async fn list_api_tokens(&self, user_id: i64) -> Result<Vec<ApiTokenView>, WebError> {
+        Ok(self
+            .api_tokens
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?
+            .iter()
+            .filter(|(_, v)| v.user_id == user_id)
+            .map(|(_, v)| v.clone())
+            .collect())
+    }
+    async fn list_all_api_tokens(&self) -> Result<Vec<ApiTokenView>, WebError> {
+        Ok(self
+            .api_tokens
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?
+            .iter()
+            .map(|(_, v)| v.clone())
+            .collect())
+    }
+    async fn delete_api_token(
+        &self,
+        caller_id: i64,
+        is_admin: bool,
+        id: i64,
+    ) -> Result<bool, WebError> {
+        // Non-ADMIN scopé à ses lignes : id inconnu et id d'autrui répondent
+        // pareil (`false` -> 404 anti-énumération dans le handler).
+        let mut store = self
+            .api_tokens
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?;
+        let pos = store
+            .iter()
+            .position(|(_, v)| v.id == id && (is_admin || v.user_id == caller_id));
+        Ok(match pos {
+            Some(i) => {
+                store.remove(i);
+                true
+            }
+            None => false,
+        })
+    }
+    async fn auth_api_token(&self, token_hash_hex: &str) -> Result<Option<UserView>, WebError> {
+        // Miroir fail-closed de la production : `enabled`, expiry
+        // lexicographique (forme canonique), propriétaire activé, puis touch
+        // best-effort de `lastUsedAt`.
+        let now = crate::db::now_iso8601().map_err(|e| WebError::internal(format!("db: {e}")))?;
+        let disabled: Vec<i64> = self
+            .disabled_users
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?
+            .clone();
+        let mut store = self
+            .api_tokens
+            .lock()
+            .map_err(|_| WebError::internal("lock"))?;
+        let Some((_, view)) = store.iter_mut().find(|(h, _)| h == token_hash_hex) else {
+            return Ok(None);
+        };
+        if !view.enabled {
+            return Ok(None);
+        }
+        if view
+            .expires_at
+            .as_deref()
+            .is_some_and(|exp| exp <= now.as_str())
+        {
+            return Ok(None);
+        }
+        if disabled.contains(&view.user_id) {
+            return Ok(None);
+        }
+        let user = match view.user_id {
+            1 => admin_user(),
+            2 => client_user(),
+            _ => return Ok(None),
+        };
+        view.last_used_at = Some(now);
+        Ok(Some(user))
     }
     async fn get_general(&self) -> Result<Value, WebError> {
         let (prom, js) = self
@@ -600,49 +719,30 @@ async fn req(
     (s, h, String::from_utf8_lossy(&body).into_owned())
 }
 
-/// Request with `Authorization: Basic` through the real router, from the
-/// fixed peer IP `127.0.0.1` so the failure throttle is observable.
-async fn req_basic(
-    app: Router,
-    method: &str,
-    uri: &str,
-    user: &str,
-    pass: &str,
-) -> (StatusCode, HeaderMap, String) {
-    let creds = B64.encode(format!("{user}:{pass}"));
-    let mut built = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header("authorization", format!("Basic {creds}"))
-        .body(Body::empty())
-        .unwrap();
-    built
-        .extensions_mut()
-        .insert(ConnectInfo(std::net::SocketAddr::from((
-            std::net::IpAddr::from([127, 0, 0, 1]),
-            12345,
-        ))));
-    let res = app.oneshot(built).await.unwrap();
-    let s = res.status();
-    let h = res.headers().clone();
-    let body = axum::body::to_bytes(res.into_body(), 1 << 20)
-        .await
-        .unwrap();
-    (s, h, String::from_utf8_lossy(&body).into_owned())
-}
-
-/// GET/POST with `Authorization: Bearer <token>` through the real router
-/// (used by the I6 metrics tests).
+/// GET/POST with `Authorization: Bearer <token>` through the real router,
+/// from the fixed peer IP `127.0.0.1` so the failure throttle is observable
+/// (used by the I1 credential-throttle tests and the I6 metrics tests).
 async fn req_bearer(
     app: Router,
     method: &str,
     uri: &str,
     token: &str,
 ) -> (StatusCode, HeaderMap, String) {
+    req_authorization(app, method, uri, &format!("Bearer {token}")).await
+}
+
+/// GET/POST with a raw `Authorization` header value (any scheme), so the
+/// scheme-parsing rules can be exercised without hardcoding `Bearer`.
+async fn req_authorization(
+    app: Router,
+    method: &str,
+    uri: &str,
+    value: &str,
+) -> (StatusCode, HeaderMap, String) {
     let mut built = Request::builder()
         .method(method)
         .uri(uri)
-        .header("authorization", format!("Bearer {token}"))
+        .header("authorization", value)
         .body(Body::empty())
         .unwrap();
     built
@@ -672,6 +772,11 @@ async fn private_routes_401_without_auth() {
         ("GET", "/api/admin/general"),
         ("POST", "/api/admin/interface/restart"),
         ("GET", "/api/client/1/configuration"),
+        ("GET", "/api/me/tokens"),
+        ("POST", "/api/me/tokens"),
+        ("DELETE", "/api/me/tokens/1"),
+        ("GET", "/api/admin/tokens"),
+        ("DELETE", "/api/admin/tokens/1"),
     ] {
         let (s, _, _) = req(app.clone(), m, u, None).await;
         assert_eq!(s, StatusCode::UNAUTHORIZED, "{m} {u}");
@@ -1622,6 +1727,111 @@ async fn me_page_renders_shared_macros() {
     assert!(body.contains(r#"name="currentPassword""#), "{body}");
 }
 
+/// Jetons d'API sur `/me` : aucun commentaire askama ne fuit (`#}` brut
+/// absent de `/me` comme de `/admin`), les champs de création portent leurs
+/// exemples (`placeholder`), et la liste rend une grille à colonnes fixes
+/// (nom en `strong` + 3 valeurs en `.trow__v.num` mono tabulaires + ligne de
+/// tête `trow--head` en `.hud`, sans carte ni pastille ni préfixe ni `dl.kv`,
+/// dates courtes `JJ-MM-AAAA`, expiration permanente comme les clients,
+/// révocation `hx-delete`).
+/// Prouvé via le vrai routeur, après création par la vraie route
+/// `POST /api/me/tokens`.
+#[tokio::test]
+async fn me_tokens_list_dense_rows_placeholders_no_template_leak() {
+    let (app, _) = token_state();
+    for url in ["/me", "/admin"] {
+        let (s, _, body) = req(app.clone(), "GET", url, Some("wg-ez=valid")).await;
+        assert_eq!(s, StatusCode::OK, "{url}");
+        assert!(
+            !body.contains("#}"),
+            "commentaire askama en fuite sur {url}"
+        );
+    }
+    let (s, _, body) = req(app.clone(), "GET", "/me", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains(r#"placeholder="25-12-2031""#), "{body}");
+    // Chapeau du panneau jetons : compteur « X API tokens » (meme `.hud` que le
+    // username a droite de « Profile ») au lieu de l'ancien etat vide texte.
+    assert!(body.contains("0 API tokens"), "{body}");
+    assert!(!body.contains("No API tokens yet."), "{body}");
+    // Crée un jeton daté par la vraie route : la liste doit rendre la ligne
+    // en grille (nom en gras, valeurs mono alignées, révocation).
+    let (s, _, created) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"ci","expiresAt":"2027-01-02T00:00:00Z"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (_, _) = created_token(&created);
+    let (s, _, body) = req(app.clone(), "GET", "/me", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK);
+    // Le compteur du chapeau suit la liste (un jeton créé ci-dessus).
+    assert!(body.contains("1 API tokens"), "{body}");
+    // Le formulaire de création ne swap rien et porte les libellés de la
+    // modale en `data-t-*` (lus par `app.js`, zéro texte en dur côté JS) ;
+    // l'ancien slot d'affichage unique a disparu.
+    assert!(body.contains(r#"id="token-form""#), "{body}");
+    assert!(
+        body.contains(r#"id="token-form" hx-post="/api/me/tokens" hx-swap="none""#),
+        "{body}"
+    );
+    assert!(body.contains(r#"data-t-title="New API token""#), "{body}");
+    assert!(body.contains(r#"data-t-copy="Copy token""#), "{body}");
+    assert!(body.contains(r#"data-t-copied="Token copied.""#), "{body}");
+    assert!(!body.contains("token-slot"), "{body}");
+    // UNE ligne de grille par jeton : tête en `.hud`, nom en gras, 3 valeurs
+    // mono tabulaires alignées (`trow__v num`), RÉVOQUER en dernière colonne.
+    // Pas de colonne préfixe (reste dans l'API JSON uniquement).
+    assert!(body.contains(r#"<li class="trow">"#), "{body}");
+    assert!(body.contains(r#"class="trow trow--head""#), "{body}");
+    // Fantôme du bouton dans l'en-tête : sans lui la piste `auto` vaudrait 0
+    // et toutes les colonnes seraient décalées par rapport aux lignes.
+    assert!(body.contains("trow__ghost"), "{body}");
+    assert!(body.contains(r#"<strong>ci</strong>"#), "{body}");
+    assert!(body.contains(r#"class="trow__v num""#), "{body}");
+    // Chaque valeur voyage avec son libellé (affiché en mobile).
+    assert!(body.contains(r#"class="hud trow__lab""#), "{body}");
+    // Le préfixe n'est plus exposé nulle part (ni UI, ni API).
+    assert!(!body.contains("prefix"), "préfixe en fuite : {body}");
+    assert!(body.contains("02-01-2027"), "{body}");
+    assert!(body.contains("01-01-2026"), "{body}");
+    assert!(body.contains("Never"), "{body}");
+    // Jeton permanent : même système que les clients (`clients.never_expires`,
+    // dates `JJ-MM-AAAA` via `display_date`).
+    let (s, _, _) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"perm"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _, body) = req(app, "GET", "/me", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(body.contains(r#"<strong>perm</strong>"#), "{body}");
+    assert!(body.contains("Permanent"), "{body}");
+    // Ni carte, ni pastille, ni tableau `kv` dans la section jetons.
+    let sec = body
+        .split(r#"id="api-tokens""#)
+        .nth(1)
+        .expect("section jetons");
+    assert!(!sec.contains("<article"), "carte interdite : {sec}");
+    assert!(!sec.contains("<dl"), "tableau kv interdit : {sec}");
+    assert!(!sec.contains("class=\"pill"), "pastille interdite : {sec}");
+    assert!(
+        !body.contains("2026-01-01T00:00:00Z"),
+        "ISO brut en fuite : {body}"
+    );
+    assert!(
+        !body.contains("2027-01-02T00:00:00Z"),
+        "ISO brut en fuite : {body}"
+    );
+    assert!(body.contains(r#"hx-delete="/api/me/tokens/1""#), "{body}");
+    assert!(!body.contains("#}"), "commentaire askama en fuite : {body}");
+}
+
 /// `POST /api/me/username`: the handler forwards both the current password
 /// and the new username to the backend (single validation + guard source).
 /// Without a session it is 401; with a wrong password the backend refuses
@@ -1747,27 +1957,20 @@ async fn totp_confirm_requires_current_password() {
     );
 }
 
-/// I1: Basic-auth **failures** are throttled 10/min/IP. Ten wrong attempts
-/// pass (401), the 11th is refused 429 before touching Argon2.
+/// I1: Bearer-credential **failures** are throttled 10/min/IP. Ten wrong
+/// attempts pass (401), the 11th is refused 429 before the token lookup.
 #[tokio::test]
-async fn basic_failures_rate_limited_after_ten() {
+async fn bearer_failures_rate_limited_after_ten() {
     let app = build_router(finished_state());
     for i in 0..10 {
-        let (s, _, _) = req_basic(
-            app.clone(),
-            "GET",
-            "/api/session",
-            "admin",
-            "wrong-password",
-        )
-        .await;
+        let (s, _, _) = req_bearer(app.clone(), "GET", "/api/session", "wrong-token").await;
         assert_eq!(s, StatusCode::UNAUTHORIZED, "failure #{i} must be 401");
     }
-    let (s, _, _) = req_basic(app, "GET", "/api/session", "admin", "wrong-password").await;
+    let (s, _, _) = req_bearer(app, "GET", "/api/session", "wrong-token").await;
     assert_eq!(
         s,
         StatusCode::TOO_MANY_REQUESTS,
-        "11th Basic failure must be 429"
+        "11th Bearer failure must be 429"
     );
 }
 
@@ -1848,53 +2051,101 @@ async fn login_coarse_ip_bucket_bounds_spraying_across_usernames() {
     );
 }
 
-/// I1: Basic successes are never counted, so a legitimate API client polling
-/// 20 times is not throttled (unlike the interactive login bucket).
+/// I1: Bearer successes are never counted, so a legitimate API client
+/// polling 20 times is not throttled (unlike the interactive login bucket).
 #[tokio::test]
-async fn basic_success_never_throttled() {
-    let app = build_router(finished_state());
+async fn bearer_success_never_throttled() {
+    let (app, _) = token_state();
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"polling"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, clear) = created_token(&body);
     for i in 0..20 {
-        let (s, _, _) =
-            req_basic(app.clone(), "GET", "/api/session", "admin", BASIC_PASSWORD).await;
-        assert_eq!(s, StatusCode::OK, "legitimate Basic request #{i} throttled");
+        let (s, _, _) = req_bearer(app.clone(), "GET", "/api/session", &clear).await;
+        assert_eq!(
+            s,
+            StatusCode::OK,
+            "legitimate Bearer request #{i} throttled"
+        );
     }
 }
 
-/// I1: a wrong Basic password is answered 401 + the `password` security log
-/// (observable as the same 401 JSON from the real router).
+/// RFC 6750 §2.1: the `Bearer` scheme is case-insensitive. `bearer`/`BEARER`
+/// authenticate; an unrelated scheme or an empty credential fails closed `401`.
 #[tokio::test]
-async fn basic_failure_is_401_password_seclog_path() {
-    let app = build_router(finished_state());
-    let (s, _, body) = req_basic(app, "GET", "/api/session", "admin", "definitely-wrong").await;
-    assert_eq!(s, StatusCode::UNAUTHORIZED);
-    assert!(body.contains("bad credentials"), "{body}");
-}
+async fn bearer_scheme_is_case_insensitive() {
+    let (app, _) = token_state();
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"ci"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (_, clear) = created_token(&body);
 
-/// I1: a correct password on a 2FA account and a wrong password are answered
-/// identically (status + body), so Basic is not a password-validity oracle.
-#[tokio::test]
-async fn basic_2fa_not_distinguishable_from_bad_password() {
-    let app = build_router(finished_state());
-    let (s_bad, h_bad, body_bad) = req_basic(
+    for scheme in ["Bearer", "bearer", "BEARER", "bEaReR"] {
+        let (s, _, _) = req_authorization(
+            app.clone(),
+            "GET",
+            "/api/session",
+            &format!("{scheme} {clear}"),
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "schéma `{scheme}` refusé");
+    }
+    // Another scheme must not authenticate the same credential.
+    let (s, _, _) = req_authorization(
         app.clone(),
         "GET",
         "/api/session",
-        "admin",
-        "wrong-password",
+        &format!("Token {clear}"),
     )
     .await;
-    let (s_totp, h_totp, body_totp) =
-        req_basic(app, "GET", "/api/session", "totp", "whatever-password").await;
-    assert_eq!(s_bad, StatusCode::UNAUTHORIZED);
-    assert_eq!(
-        s_totp,
-        StatusCode::UNAUTHORIZED,
-        "2FA must no longer answer 403 (oracle)"
-    );
-    assert_eq!(s_bad, s_totp);
-    assert_eq!(body_bad, body_totp);
-    assert!(!h_bad.contains_key("set-cookie"));
-    assert!(!h_totp.contains_key("set-cookie"));
+    assert_eq!(s, StatusCode::UNAUTHORIZED, "scheme != Bearer doit échouer");
+    // Scheme with no credential, and a bare scheme word, both fail closed.
+    for value in ["Bearer", "Bearer   ", "bearer"] {
+        let (s, _, _) = req_authorization(app.clone(), "GET", "/api/session", value).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "`{value}` doit échouer");
+    }
+}
+
+/// Breaking change: `Authorization: Basic` is no longer honored (only the
+/// session cookie and `Bearer` tokens authenticate). A Basic header answers
+/// 401 like a missing credential — `curl -u` must never authenticate.
+#[tokio::test]
+async fn basic_auth_header_is_rejected_like_no_credential() {
+    let app = build_router(finished_state());
+    let mut built = Request::builder()
+        .method("GET")
+        .uri("/api/session")
+        .header("authorization", "Basic YWRtaW46d3JvbmctcGFzc3dvcmQxMg==")
+        .body(Body::empty())
+        .unwrap();
+    built
+        .extensions_mut()
+        .insert(ConnectInfo(std::net::SocketAddr::from((
+            std::net::IpAddr::from([127, 0, 0, 1]),
+            12345,
+        ))));
+    let res = app.oneshot(built).await.unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// I1: an unknown Bearer token is answered 401 + the `password` security log
+/// (observable as the 401 JSON from the real router).
+#[tokio::test]
+async fn bearer_failure_is_401_password_seclog_path() {
+    let app = build_router(finished_state());
+    let (s, _, body) = req_bearer(app, "GET", "/api/session", "definitely-wrong").await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+    assert!(body.contains("bad token"), "{body}");
 }
 
 /// I4: `serverAllowedIps` is an ADMIN-only field (it injects extra server-side
@@ -2949,7 +3200,7 @@ async fn csrf_post_cross_site_public_endpoint_forbidden() {
     assert_eq!(s, StatusCode::FORBIDDEN);
 }
 
-/// CSRF: a non-browser client (curl / Basic API / parity audit) sends no
+/// CSRF: a non-browser client (curl / Bearer API / parity audit) sends no
 /// `Sec-Fetch-Site` at all: it must still pass (fail-open by design).
 #[tokio::test]
 async fn csrf_post_without_header_passes() {
@@ -2972,4 +3223,325 @@ async fn csrf_get_cross_site_passes() {
     let app = build_router(finished_state());
     let (s, _, _) = get_fetch_site(app, "/api/information", "cross-site").await;
     assert_eq!(s, StatusCode::OK);
+}
+
+/// Finished setup with direct access to the [`TestBackend`] underneath, so
+/// API-token rows can be aged/disabled in place (expiry, revocation and
+/// disabled-owner cases) through the real router.
+fn token_state() -> (Router, Arc<TestBackend>) {
+    let backend = Arc::new(backend(0, (true, true), Some("scrape-secret")));
+    let state = AppState::new(
+        backend.clone(),
+        crate::web::ctx::Locales::load().expect("locales"),
+        vec![],
+    );
+    (build_router(state), backend)
+}
+
+fn created_token(body: &str) -> (i64, String) {
+    let v: Value = serde_json::from_str(body).expect("created token json");
+    assert!(
+        v.get("prefix").is_none(),
+        "le préfixe ne doit plus être exposé : {body}"
+    );
+    (
+        v.get("id").and_then(Value::as_i64).expect("id"),
+        v.get("token")
+            .and_then(Value::as_str)
+            .expect("token")
+            .to_string(),
+    )
+}
+
+fn expire_token(backend: &TestBackend, id: i64) {
+    let mut store = backend.api_tokens.lock().expect("lock");
+    let (_, view) = store.iter_mut().find(|(_, v)| v.id == id).expect("row");
+    view.expires_at = Some("2000-01-01T00:00:00Z".to_string());
+}
+
+fn disable_token(backend: &TestBackend, id: i64) {
+    let mut store = backend.api_tokens.lock().expect("lock");
+    let (_, view) = store.iter_mut().find(|(_, v)| v.id == id).expect("row");
+    view.enabled = false;
+}
+
+/// `POST /api/me/tokens` returns the clear value exactly once (never the
+/// hash); the list hides both; the Bearer guard resolves the token through
+/// the real router.
+#[tokio::test]
+async fn api_tokens_create_once_list_hides_secrets_bearer_resolves() {
+    let (app, _) = token_state();
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"ci","expiresAt":"2999-01-01T00:00:00Z"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (id, clear) = created_token(&body);
+    assert_eq!(clear.len(), 43, "256 bits en base64url sans padding");
+    assert!(
+        !body.contains("tokenHash"),
+        "le hash ne doit pas fuiter : {body}"
+    );
+    assert_eq!(id, 1);
+
+    // La liste ne contient ni le clair ni le hash.
+    let (s, _, body) = req(app.clone(), "GET", "/api/me/tokens", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(body.contains("ci"), "{body}");
+    assert!(
+        !body.contains(&clear),
+        "le clair n'est montré qu'une fois : {body}"
+    );
+    assert!(!body.contains("tokenHash"), "{body}");
+
+    // Le Bearer résout le principal : une route gardée répond 200.
+    let (s, _, _) = req_bearer(app.clone(), "GET", "/api/client", &clear).await;
+    assert_eq!(s, StatusCode::OK);
+    // Mauvais token -> même 401 sans oracle.
+    let (s, _, _) = req_bearer(app, "GET", "/api/client", "nope-not-a-token").await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+/// Noms invalides -> 400 via le vrai routeur (vide, trop long).
+#[tokio::test]
+async fn api_tokens_create_validates_name() {
+    let (app, _) = token_state();
+    for body in [
+        r#"{"name":""}"#,
+        &format!(r#"{{"name":"{}"}}"#, "x".repeat(65)),
+    ] {
+        let (s, _, resp) =
+            post_json(app.clone(), "/api/me/tokens", Some("wg-ez=valid"), body).await;
+        assert_eq!(s, StatusCode::BAD_REQUEST, "{resp}");
+    }
+}
+
+/// Bearer expiré / désactivé / propriétaire désactivé / révoqué -> 401.
+#[tokio::test]
+async fn api_tokens_bearer_fails_closed() {
+    let (app, backend) = token_state();
+    let (_, clear_exp) = {
+        let (s, _, body) = post_json(
+            app.clone(),
+            "/api/me/tokens",
+            Some("wg-ez=valid"),
+            r#"{"name":"exp"}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        created_token(&body)
+    };
+    let (_, clear_off) = {
+        let (s, _, body) = post_json(
+            app.clone(),
+            "/api/me/tokens",
+            Some("wg-ez=valid"),
+            r#"{"name":"off"}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        created_token(&body)
+    };
+    // Jeton d'un CLIENT, dont le compte sera désactivé.
+    let (_, clear_user) = {
+        let (s, _, body) = post_json(
+            app.clone(),
+            "/api/me/tokens",
+            Some("wg-ez=client"),
+            r#"{"name":"bobtok"}"#,
+        )
+        .await;
+        assert_eq!(s, StatusCode::OK, "{body}");
+        created_token(&body)
+    };
+    expire_token(&backend, 1);
+    disable_token(&backend, 2);
+    backend.disabled_users.lock().expect("lock").push(2);
+
+    for clear in [&clear_exp, &clear_off, &clear_user] {
+        let (s, _, _) = req_bearer(app.clone(), "GET", "/api/client", clear).await;
+        assert_eq!(s, StatusCode::UNAUTHORIZED, "fail-closed attendu");
+    }
+    // Un jeton révoqué ne résout plus rien.
+    let (s, _, _) = req(
+        app.clone(),
+        "DELETE",
+        "/api/me/tokens/1",
+        Some("wg-ez=valid"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _, _) = req_bearer(app, "GET", "/api/client", &clear_exp).await;
+    assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+/// Isolation par utilisateur : un CLIENT ne liste/révoque que ses jetons
+/// (id d'autrui == id inconnu : 404) ; l'ADMIN voit et révoque tout.
+#[tokio::test]
+async fn api_tokens_scoped_revoke_and_admin_view() {
+    let (app, _) = token_state();
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=valid"),
+        r#"{"name":"admintok"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (admin_id, _) = created_token(&body);
+    let (s, _, body) = post_json(
+        app.clone(),
+        "/api/me/tokens",
+        Some("wg-ez=client"),
+        r#"{"name":"bobtock"}"#,
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    let (bob_id, _) = created_token(&body);
+
+    // Le CLIENT ne voit que le sien.
+    let (s, _, body) = req(app.clone(), "GET", "/api/me/tokens", Some("wg-ez=client")).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(body.contains("bobtock"), "{body}");
+    assert!(!body.contains("admintok"), "{body}");
+
+    // Le CLIENT qui vise le jeton de l'ADMIN : même 404 qu'un inconnu.
+    let (s, _, _) = req(
+        app.clone(),
+        "DELETE",
+        &format!("/api/me/tokens/{admin_id}"),
+        Some("wg-ez=client"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+    let (s, _, _) = req(
+        app.clone(),
+        "DELETE",
+        "/api/me/tokens/999999",
+        Some("wg-ez=client"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+
+    // Non-ADMIN sur les routes ADMIN -> 403 ; ADMIN -> 200 avec tout.
+    let (s, _, _) = req(
+        app.clone(),
+        "GET",
+        "/api/admin/tokens",
+        Some("wg-ez=client"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::FORBIDDEN);
+    let (s, _, body) = req(app.clone(), "GET", "/api/admin/tokens", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK, "{body}");
+    assert!(
+        body.contains("admintok") && body.contains("bobtock"),
+        "{body}"
+    );
+
+    // L'ADMIN révoque le jeton d'autrui ; le propriétaire révoque le sien.
+    let (s, _, _) = req(
+        app.clone(),
+        "DELETE",
+        &format!("/api/admin/tokens/{bob_id}"),
+        Some("wg-ez=valid"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let (s, _, _) = req(
+        app.clone(),
+        "DELETE",
+        &format!("/api/me/tokens/{admin_id}"),
+        Some("wg-ez=valid"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    // Seconde révocation -> 404 (déjà parti).
+    let (s, _, _) = req(
+        app,
+        "DELETE",
+        &format!("/api/me/tokens/{admin_id}"),
+        Some("wg-ez=valid"),
+    )
+    .await;
+    assert_eq!(s, StatusCode::NOT_FOUND);
+}
+
+/// Création htmx : corps ignoré (`hx-swap="none"`, `{"ok":true}`) + triggers
+/// `refreshMe` pour la liste et `showToken` (le clair, ASCII seul) pour la
+/// modale `app.js` ; la page `/me` embarque la section jetons avec les
+/// libellés de la modale en `data-t-*` (zéro texte en dur côté JS), en EN
+/// comme en FR. Les appelants non-htmx gardent le JSON complet (cf.
+/// `api_tokens_create_once_list_hides_secrets_bearer_resolves`).
+#[tokio::test]
+async fn api_tokens_hx_create_modal_trigger_and_me_section() {
+    let (app, _) = token_state();
+    let mut built = Request::builder()
+        .method("POST")
+        .uri("/api/me/tokens")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .header("hx-request", "true")
+        .header("cookie", "wg-ez=valid")
+        .body(Body::from("name=script"))
+        .unwrap();
+    built
+        .extensions_mut()
+        .insert(ConnectInfo(std::net::SocketAddr::from((
+            std::net::IpAddr::from([127, 0, 0, 1]),
+            12345,
+        ))));
+    let res = app.clone().oneshot(built).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let trigger = res
+        .headers()
+        .get("hx-trigger")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(trigger.contains("refreshMe"), "{trigger}");
+    let trig: Value = serde_json::from_str(trigger).expect("trigger json");
+    let shown = trig
+        .get("showToken")
+        .and_then(Value::as_str)
+        .expect("showToken");
+    assert_eq!(shown.len(), 43, "256 bits en base64url sans padding");
+    let body = axum::body::to_bytes(res.into_body(), 1 << 20)
+        .await
+        .unwrap();
+    let body = String::from_utf8_lossy(&body);
+    // Corps ignoré par `hx-swap="none"` : le clair n'y figure jamais, il ne
+    // voyage que dans le trigger vers la modale.
+    assert!(body.contains(r#""ok":true"#), "{body}");
+    assert!(!body.contains(shown), "{body}");
+
+    // La page `/me` liste le jeton (nom + préfixe, jamais le clair complet)
+    // et porte les libellés de la modale pour `app.js`.
+    let (s, _, page) = req(app.clone(), "GET", "/me", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(
+        page.contains(r#"id="api-tokens""#),
+        "section jetons absente"
+    );
+    assert!(page.contains("script"), "nom du jeton absent");
+    assert!(
+        page.contains(r#"data-t-title="New API token""#),
+        "titre de modale absent"
+    );
+    assert!(
+        page.contains(r#"data-t-warning="Copy it now"#),
+        "consigne de modale absente"
+    );
+    assert!(
+        page.contains(r#"data-t-copy="Copy token""#),
+        "bouton Copier de modale absent"
+    );
+    assert!(!page.contains(r#"id="token-slot""#), "ancien slot présent");
+    assert!(!page.contains(shown), "le clair ne doit pas fuiter");
+    // FR : mêmes libellés traduits, lus par la même modale.
+    let (s, _, fr) = req(app, "GET", "/me?lang=fr", Some("wg-ez=valid")).await;
+    assert_eq!(s, StatusCode::OK);
+    assert!(fr.contains("Nouveau jeton"), "{fr}");
+    assert!(fr.contains("Copiez-le maintenant"), "{fr}");
 }

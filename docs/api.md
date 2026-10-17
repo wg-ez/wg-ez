@@ -16,7 +16,7 @@ are thin; logic lives in `src/web/backend/*` behind the `Backend` trait.
 | Paths | Strict: trailing slash is `404` on `/api`, `/metrics`, `/cnf`. Only `//` doubling `308`-redirects. |
 | Errors | `{ "error": "<short message>" }`. `500` is always `{ "error": "internal error" }`. |
 | Cache | Dynamic responses are `Cache-Control: no-store`. |
-| CSRF | Mutating `POST\|PUT\|PATCH\|DELETE` with `Sec-Fetch-Site: cross-site` (or `same-site`) is `403`. Header absent (curl, Basic API) is allowed. |
+| CSRF | Mutating `POST\|PUT\|PATCH\|DELETE` with `Sec-Fetch-Site: cross-site` (or `same-site`) is `403`. Header absent (curl, Bearer API) is allowed. |
 
 ## Auth
 
@@ -25,10 +25,13 @@ Two interchangeable credentials (`src/web/guards.rs`):
 1. **Session cookie** `wg-ez` — minted by `POST /api/auth/password` (or
    `verify-2fa`). `Secure` unless `INSECURE=true`. Browser-session cookie
    (no `Max-Age`).
-2. **`Authorization: Basic user:pass`** — base64 `user:pass` on every request.
-   Refused with `401` when the account has 2FA active (`totpVerified`), so 2FA
-   cannot be bypassed. Wrong password and correct-password-on-2FA-account
-   answer identically (no oracle).
+2. **`Authorization: Bearer <api-token>`** — long-lived token created under
+   `POST /api/me/tokens` (shown once, only its SHA-256 hex is stored).
+   Bearer stays valid on 2FA accounts: it is an explicit,
+   revocable credential (list/revoke under `/api/me/tokens`), not a password
+   bypass. Unknown/revoked/expired/disabled tokens answer `401` like a wrong
+   password (no oracle). Only the SHA-256 hex is stored — never the clear
+   token. The scheme is case-insensitive (`Bearer`, `bearer`, …).
 
 Unauthenticated → `401`. Authenticated but insufficient role → `403`
 (`ADMIN` has everything; `CLIENT` is scoped to its own clients/profile).
@@ -41,14 +44,16 @@ curl -c jar http://localhost:51821/api/auth/password \
   -d '{"username":"admin","password":"change-me-to-12-chars-min"}'
 curl -b jar http://localhost:51821/api/client
 
-# basic flow (no 2FA on the account)
-curl -u admin:change-me-to-12-chars-min http://localhost:51821/api/client
+# bearer flow (valid on 2FA accounts)
+TOKEN=$(curl -s -b jar -H 'Content-Type: application/json' \
+  -d '{"name":"ci"}' http://localhost:51821/api/me/tokens | python3 -c "import sys,json;print(json.load(sys.stdin)['token'])")
+curl -H "Authorization: Bearer $TOKEN" http://localhost:51821/api/client
 ```
 
 Rate limits (in-memory, per IP unless noted): login 10/min per `(IP, username)`
-+ 50/min per IP, `verify-2fa` per-IP, Basic failures 10/min/IP (successes never
-count), client/admin mutations per-IP, `/cnf` 20/min/IP, `/metrics` failures
-30/min/IP, `/setup` 20/min/IP.
++ 50/min per IP, `verify-2fa` per-IP, Bearer credential failures 10/min/IP
+(shared bucket, successes never count), client/admin mutations per-IP,
+`/cnf` 20/min/IP, `/metrics` failures 30/min/IP, `/setup` 20/min/IP.
 
 ## Public
 
@@ -91,7 +96,7 @@ Drops the pending id, clears its cookie. → `{ "ok": true }`.
 
 ## Session / profile
 
-Auth required (cookie or Basic).
+Auth required (cookie or Bearer).
 
 | Method + path | Description |
 | --- | --- |
@@ -99,8 +104,11 @@ Auth required (cookie or Basic).
 | `DELETE /api/session` | Logout, destroys server-side session, clears cookie. → `{ "ok": true }`. |
 | `POST /api/me` | Update display name. Body `{ "name": "..." }` (1–128 chars). |
 | `POST /api/me/username` | Change login. Body `{ "currentPassword": "...", "username": "..." }`. |
-| `POST /api/me/password` | Change password. Body `{ "currentPassword": "...", "newPassword": "..." }` (12+ chars). |
+| `POST /api/me/password` | Change password. Body `{ "currentPassword": "...", "newPassword": "..." }` (12+ chars). Revokes every session **and every API token** of the account. |
 | `POST /api/me/totp` | Body `{ "action": "start\|confirm\|remove", "code"?, "password"? }`. `start` needs current `password` (even for first enrollment) → `{ "secret", "otpauth_url", "qr_svg" }` (JSON API; htmx gets an HTML fragment). `confirm` needs 6-digit `code` + current `password`. `remove` needs current `password`. |
+| `GET /api/me/tokens` | Own API tokens (`id, userId, name, expiresAt?, lastUsedAt?, createdAt, enabled`). Never the clear value nor the hash. |
+| `POST /api/me/tokens` | Create. Body `{ "name": "…" (1–64 chars), "expiresAt"?: "ISO-8601" or "DD-MM-YYYY" \| null }` (absent/empty/`null` = permanent, past = `400`). → `{ "id", "name", "token", "expiresAt"?, "createdAt" }`: `token` is the clear value, returned **exactly once** (htmx callers get `{"ok":true}` + `HX-Trigger {"refreshMe","showToken"}`: the value opens once in the modal). |
+| `DELETE /api/me/tokens/{id}` | Revoke own token. Unknown id and another user's id both answer `404` (anti-enumeration). → `{ "ok": true }`. |
 
 ## Clients
 
@@ -155,6 +163,43 @@ coercion) and re-applies the tunnel: hot `wg syncconf`, or full `down`+`up`
 | `POST /api/admin/interface/cidr` | Reallocate pools. Body `{ "ipv4Cidr"?, "ipv6Cidr"? }`. CIDR change → restart (+ NAT hooks rewrite). |
 | `POST /api/admin/interface/restart` | Explicit `wg-quick down`+`up`. Cuts tunnels. → `{ "ok": true }`. |
 | `GET /api/admin/ip-info` | Public-IP/hostname candidates (15-min cache). |
+| `GET /api/admin/tokens` | Every API token (same shape as `GET /api/me/tokens`). |
+| `DELETE /api/admin/tokens/{id}` | Revoke any API token. → `{ "ok": true }`. |
+
+## API tokens
+
+Long-lived `Bearer` credentials for scripts and automation, managed per
+account (plus a `/me` section in the UI: list + create form + revoke
+buttons, all htmx, no inline JS):
+
+```bash
+# create (clear value returned ONCE — copy it now)
+curl -b jar -H 'Content-Type: application/json' \
+  -d '{"name":"ci","expiresAt":"2027-01-01T00:00:00Z"}' \
+  http://localhost:51821/api/me/tokens
+# -> {"id":1,"name":"ci","token":"<copy-now>",...}
+
+curl http://localhost:51821/api/me/tokens -b jar        # list (no secrets)
+curl -X DELETE http://localhost:51821/api/me/tokens/1 -b jar  # revoke
+
+# use (valid on 2FA accounts)
+curl -H "Authorization: Bearer <token>" http://localhost:51821/api/client
+```
+
+Rules: only the SHA-256 hex is stored (see `src/store/api_token.rs`;
+generation/validation in `src/web/backend/api_tokens.rs`, guard in
+`src/web/guards.rs`); `expiresAt` absent/`null` = permanent; expired tokens
+are auto-disabled by the 60 s cron (DB-only, no `Tunnel::apply`); failed
+Bearer checks share the 10/min/IP credential bucket; the clear value is never
+logged.
+
+**Rotation revokes tokens.** `POST /api/me/password` (and the CLI
+`db:admin:reset`) deletes every session **and every API token** of the
+account, so a token leaked before the change stops working immediately —
+re-issue one after rotating. Disabling the account and deleting it have the
+same effect (`enabled=0` fails every token check; the row cascades on
+`DELETE`). Rescue CLI: `wg-ez cli api-tokens:list
+[--user <name>]` / `wg-ez cli api-tokens:revoke <id>` (see `docs/setup.md`).
 
 ## Setup wizard (only during setup)
 
@@ -168,9 +213,11 @@ coercion) and re-applies the tunnel: hot `wg syncconf`, or full `down`+`up`
 ## Metrics
 
 Fail-closed (live-verified): a Bearer token is **always** required —
-`Authorization: Bearer <metricsPassword>`. With no stored password every
-request is `401 metrics auth required`, even with both flags off. Set the
-password via `POST /api/admin/general` (`metricsPassword` field), then enable
+`Authorization: Bearer <metricsPassword>`. Note this Bearer credential is the
+**metrics password, not an API token**: `/metrics/*` does not accept the tokens
+from `/api/me/tokens` (separate store, separate check). With no stored
+password every request is `401 metrics auth required`, even with both flags
+off. Set the password via `POST /api/admin/general` (`metricsPassword` field), then enable
 `metricsPrometheus` / `metricsJson`. Order: Bearer check first (`401`), then
 the per-endpoint flag (`400 metrics disabled` when off). Only failed Bearer
 checks count toward the 30/min/IP limit (Argon2 is paid only after the 429

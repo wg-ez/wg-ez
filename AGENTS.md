@@ -79,9 +79,13 @@ The host provides **only Docker + Compose**. There is no host cargo/rust/node.
   `/metrics/*`; UI pages at `/`, `/clients/{id}`, `/me`, `/login`, `/admin`, `/setup/*`.
 - Handlers are thin; real logic lives in `src/web/backend/*` behind the `Backend` trait.
   `TestBackend` (`src/web/router/tests.rs`) is injected for router tests.
-- Auth: `wg-ez` cookie or `Authorization: Basic` (Basic refused when 2FA is active).
-  Only the SHA-256 of a 256-bit session token is stored. Rate limits are in-memory.
-  CSRF is enforced via `Sec-Fetch-Site`.
+- Auth: `wg-ez` cookie or `Authorization: Bearer <api-token>` (long-lived token from
+  `/api/me/tokens`, valid on 2FA accounts; `/metrics/*` instead takes the separate
+  `metricsPassword` as its Bearer credential). There is **no password fallback on API
+  routes** — automation must use revocable Bearer tokens. A password rotation
+  (`POST /api/me/password`, CLI `db:admin:reset`) revokes **both** the sessions and the
+  API tokens of the account. Only the SHA-256 of a 256-bit token is stored, for both
+  families. Rate limits are in-memory. CSRF is enforced via `Sec-Fetch-Site`.
 - i18n is EN + FR only; `locales/en.json` is canonical. Templates compile in via
   askama (`askama.toml` points at `templates/`).
 

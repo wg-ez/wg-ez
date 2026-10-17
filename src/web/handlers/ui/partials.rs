@@ -6,7 +6,7 @@
 use askama::Template;
 
 use super::{cards::Card, chrome::Base};
-use crate::web::ctx::UserView;
+use crate::web::ctx::{ApiTokenView, UserView};
 
 /// Libelles partages par la grille : source unique des cles i18n utilisees a
 /// la fois par `GridPartial` (fragment htmx) et `IndexPage` (page complete).
@@ -109,6 +109,21 @@ pub struct MeLabels {
     pub totp_setup: String,
     pub totp_remove: String,
     pub totp_active_note: String,
+    pub tokens_title: String,
+    pub tokens_note: String,
+    pub tokens_name: String,
+    pub tokens_expires: String,
+    pub tokens_expires_ph: String,
+    pub tokens_create: String,
+    pub tokens_revoke: String,
+    pub tokens_created: String,
+    pub tokens_expires_col: String,
+    pub tokens_last_used: String,
+    pub tokens_new_token: String,
+    pub tokens_token: String,
+    pub tokens_shown_once: String,
+    pub tokens_copy: String,
+    pub tokens_copied: String,
 }
 
 impl MeLabels {
@@ -130,7 +145,29 @@ impl MeLabels {
             totp_setup: t("me.totp_setup"),
             totp_remove: t("me.totp_remove"),
             totp_active_note: t("me.totp_active_note"),
+            tokens_title: t("me.api_tokens_title"),
+            tokens_note: t("me.api_tokens_note"),
+            tokens_name: t("me.api_tokens_name"),
+            tokens_expires: t("me.api_tokens_expires"),
+            tokens_expires_ph: t("me.api_tokens_expires_ph"),
+            tokens_create: t("me.api_tokens_create"),
+            tokens_revoke: t("me.api_tokens_revoke"),
+            tokens_created: t("me.api_tokens_created"),
+            tokens_expires_col: t("me.api_tokens_expires_col"),
+            tokens_last_used: t("me.api_tokens_last_used"),
+            tokens_new_token: t("me.api_tokens_new_token"),
+            tokens_token: t("me.api_tokens_token"),
+            tokens_shown_once: t("me.api_tokens_shown_once"),
+            tokens_copy: t("me.api_tokens_copy"),
+            tokens_copied: t("me.api_tokens_copied"),
         }
+    }
+
+    /// Chapeau du panneau jetons : « X API tokens ». Le nom vient du titre
+    /// (`api_tokens_title`) ; rendu en `.hud` (mono uppercase cote CSS), donc
+    /// meme police/emplacement que le username a droite de « Profile ».
+    pub fn tokens_count(&self, n: usize) -> String {
+        format!("{n} {}", self.tokens_title)
     }
 }
 
@@ -262,6 +299,41 @@ impl ClientPlaceholders {
     }
 }
 
+/// Ligne d'affichage d'un jeton d'API (`me_inner.html`, ligne dense
+/// `li.trow` : nom en gras + faits en texte courant sur une seule ligne).
+/// L'ISO canonique est pré-formaté en `JJ-MM-AAAA` (cf. `cards::display_date`, même rendu que
+/// les expirations de la grille et de la fiche client) ; une expiration
+/// absente rend `clients.never_expires` (comme les clients), une dernière
+/// utilisation absente rend `me.api_tokens_never`. L'API JSON garde la forme
+/// brute (`ApiTokenView`, préfixe inclus) : ce struct ne sert qu'au gabarit.
+pub struct TokenRow {
+    pub id: i64,
+    pub name: String,
+    pub created: String,
+    pub expires: String,
+    pub last_used: String,
+}
+
+impl TokenRow {
+    pub fn new(v: &ApiTokenView, t: &impl Fn(&str) -> String) -> Self {
+        Self {
+            id: v.id,
+            name: v.name.clone(),
+            created: super::cards::display_date(&v.created_at),
+            expires: v
+                .expires_at
+                .as_deref()
+                .map(super::cards::display_date)
+                .unwrap_or_else(|| t("clients.never_expires")),
+            last_used: v
+                .last_used_at
+                .as_deref()
+                .map(super::cards::display_date)
+                .unwrap_or_else(|| t("me.api_tokens_never")),
+        }
+    }
+}
+
 /// Corps de `/me` (cf. `partials/me_inner.html`), renvoye seul aux appelants
 /// htmx quand la 2FA change d'etat (trigger `refreshMe`). Meme motif que
 /// `GridPartial` sur l'accueil : aucun `hx-select` cote client.
@@ -272,14 +344,27 @@ pub struct MeInnerPartial {
     pub user: UserView,
     /// Libelles partages avec `MePage` (cf. `MeLabels`).
     pub labels: MeLabels,
+    /// Jetons d'API propres de l'appelant (affichage, cf. `TokenRow`).
+    pub tokens: Vec<TokenRow>,
+    /// Chapeau `.hud` du panneau jetons (« X API tokens », cf. `MeLabels::tokens_count`).
+    pub tokens_count: String,
 }
 
 impl MeInnerPartial {
-    pub(crate) fn new(base: Base, user: UserView, t: &impl Fn(&str) -> String) -> Self {
+    pub(crate) fn new(
+        base: Base,
+        user: UserView,
+        tokens: Vec<ApiTokenView>,
+        t: &impl Fn(&str) -> String,
+    ) -> Self {
+        let labels = MeLabels::load(t);
+        let tokens_count = labels.tokens_count(tokens.len());
         Self {
             base,
             user,
-            labels: MeLabels::load(t),
+            labels,
+            tokens: tokens.iter().map(|v| TokenRow::new(v, t)).collect(),
+            tokens_count,
         }
     }
 }

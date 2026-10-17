@@ -15,6 +15,7 @@ use super::{
     chrome::{Base, LangQuery, NAV_CLIENTS, NAV_ME, page_context, page_prefs, redirect},
     partials::{
         ClientLabels, ClientPlaceholders, GridLabels, GridPartial, MeInnerPartial, MeLabels,
+        TokenRow,
     },
     render_fragment, render_page,
 };
@@ -305,6 +306,10 @@ pub struct MePage {
     pub user: crate::web::ctx::UserView,
     /// Libelles partages avec `MeInnerPartial` (cf. `MeLabels`).
     pub labels: MeLabels,
+    /// Jetons d'API propres de l'appelant (affichage, cf. `TokenRow`).
+    pub tokens: Vec<TokenRow>,
+    /// Chapeau `.hud` du panneau jetons (« X API tokens », cf. `MeLabels::tokens_count`).
+    pub tokens_count: String,
 }
 
 impl MePage {
@@ -313,12 +318,17 @@ impl MePage {
     pub(crate) fn new(
         base: Base,
         user: crate::web::ctx::UserView,
+        tokens: Vec<crate::web::ctx::ApiTokenView>,
         t: &impl Fn(&str) -> String,
     ) -> Self {
+        let labels = MeLabels::load(t);
+        let tokens_count = labels.tokens_count(tokens.len());
         Self {
             base,
             user,
-            labels: MeLabels::load(t),
+            labels,
+            tokens: tokens.iter().map(|v| TokenRow::new(v, t)).collect(),
+            tokens_count,
         }
     }
 }
@@ -337,6 +347,13 @@ pub async fn me<B: Backend>(
     };
     let (lang, theme, set) = (prefs.lang, prefs.theme, prefs.set);
     let user = state.backend.get_user(auth.user_id).await?;
+    // Best-effort : un échec de lecture des jetons ne doit pas casser la page
+    // de profil (la liste API reste la source de vérité).
+    let tokens = state
+        .backend
+        .list_api_tokens(auth.user_id)
+        .await
+        .unwrap_or_default();
     let t = |k: &str| state.locales.t(lang, k);
     let base = Base::load(
         &state,
@@ -351,10 +368,10 @@ pub async fn me<B: Backend>(
     // Refresh htmx (trigger `refreshMe` apres confirm/remove 2FA) : seul le
     // corps, comme `GET /` renvoie `GridPartial` aux appelants htmx.
     if headers.contains_key("hx-request") {
-        let inner = MeInnerPartial::new(base, user, &t);
+        let inner = MeInnerPartial::new(base, user, tokens, &t);
         return render_fragment(&inner);
     }
-    let page = MePage::new(base, user, &t);
+    let page = MePage::new(base, user, tokens, &t);
     render_page(&page, &set)
 }
 

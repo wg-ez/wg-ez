@@ -9,6 +9,7 @@
 //! - dates en TEXT ISO-8601, booleens en INTEGER 0/1 (helpers `db::bool_int`,
 //!   `db::int_bool`).
 
+pub mod api_token;
 pub mod client;
 pub mod general;
 pub mod hooks;

@@ -2,12 +2,14 @@
 
 //! Cron de maintenance toutes les 60 s : auto-desactivation des clients expires
 //! (l'appelant lance un `Tunnel::apply` complet si necessaire) + purge des OTL
-//! expires (ne touche jamais WireGuard).
+//! expires + auto-desactivation des jetons d'API expires (ces deux derniers ne
+//! touchent jamais WireGuard).
 //!
-//! Le tick reutilise [`crate::store::client::disable_expired`] et
-//! [`crate::store::otl::delete_expired`] (comparaison lexicographique sur la
-//! forme TEXT canonique de `db::now_iso8601`). Une erreur de tick est loguee,
-//! jamais fatale.
+//! Le tick reutilise [`crate::store::client::disable_expired`],
+//! [`crate::store::otl::delete_expired`] et
+//! [`crate::store::api_token::disable_expired`] (comparaison lexicographique
+//! sur la forme TEXT canonique de `db::now_iso8601`). Une erreur de tick est
+//! loguee, jamais fatale.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,17 +36,22 @@ pub struct CronOutcome {
     pub disabled: usize,
     /// Lignes OTL purgees par ce tick (sans effet WireGuard).
     pub purged_otl: usize,
+    /// Jetons d'API expires desactives par ce tick (sans effet WireGuard).
+    pub disabled_tokens: usize,
 }
 
 impl CronOutcome {
     /// Vrai quand `serve` doit lancer exactement un `Tunnel::apply` complet.
+    /// Seuls les clients désactivés coupent des tunnels : OTL et jetons d'API
+    /// sont DB-only.
     pub fn needs_apply(&self) -> bool {
         self.disabled > 0
     }
 }
 
 /// Un tick complet sur une connexion ouverte : desactive les clients expires,
-/// purge les OTL expires. L'appelant decide du `Tunnel::apply` selon le resultat.
+/// purge les OTL expires, desactive les jetons d'API expires. L'appelant
+/// decide du `Tunnel::apply` selon le resultat.
 pub fn run_once(conn: &rusqlite::Connection) -> Result<CronOutcome, CronError> {
     let now = crate::db::now_iso8601().map_err(|e| CronError::Boot(e.to_string()))?;
     let disabled = crate::store::client::disable_expired(conn, &now)?;
@@ -55,9 +62,14 @@ pub fn run_once(conn: &rusqlite::Connection) -> Result<CronOutcome, CronError> {
     if purged_otl > 0 {
         tracing::debug!("cron: purged {purged_otl} expired one-time link(s)");
     }
+    let disabled_tokens = crate::store::api_token::disable_expired(conn, &now)?;
+    if disabled_tokens > 0 {
+        tracing::debug!("cron: disabled {disabled_tokens} expired API token(s)");
+    }
     Ok(CronOutcome {
         disabled,
         purged_otl,
+        disabled_tokens,
     })
 }
 
@@ -120,6 +132,14 @@ mod tests {
             [],
         )
         .expect("otl");
+        conn.execute(
+            "INSERT INTO api_tokens (userId, name, tokenHash, expiresAt, lastUsedAt, createdAt, enabled) VALUES
+             (1, 'old-token', 'hash-old', '2000-01-01T00:00:00Z', NULL, '2024-01-01T00:00:00Z', 1),
+             (1, 'new-token', 'hash-new', '2999-01-01T00:00:00Z', NULL, '2024-01-01T00:00:00Z', 1),
+             (1, 'perm-token', 'hash-perm', NULL, NULL, '2024-01-01T00:00:00Z', 1)",
+            [],
+        )
+        .expect("api tokens");
         conn
     }
 
@@ -138,7 +158,8 @@ mod tests {
             out,
             CronOutcome {
                 disabled: 1,
-                purged_otl: 1
+                purged_otl: 1,
+                disabled_tokens: 1,
             }
         );
         assert!(out.needs_apply());
@@ -146,6 +167,19 @@ mod tests {
         assert_eq!(enabled(&conn, "old"), 0, "expired disabled");
         assert_eq!(enabled(&conn, "future"), 1, "future untouched");
         assert_eq!(enabled(&conn, "off"), 0, "already off untouched");
+        // Jetons d'API : seul l'expiré encore actif est désactivé, sans
+        // `Tunnel::apply` supplémentaire (le `needs_apply` vient des clients).
+        let token_state = |name: &str| -> i64 {
+            conn.query_row(
+                "SELECT enabled FROM api_tokens WHERE name = ?1",
+                [name],
+                |r| r.get(0),
+            )
+            .expect("row")
+        };
+        assert_eq!(token_state("old-token"), 0, "expired token disabled");
+        assert_eq!(token_state("new-token"), 1, "future token untouched");
+        assert_eq!(token_state("perm-token"), 1, "permanent token untouched");
     }
 
     #[test]

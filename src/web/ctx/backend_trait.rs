@@ -8,8 +8,8 @@ use serde_json::Value;
 
 use super::errors::WebError;
 use super::views::{
-    ClientView, GlobalDefaults, LoginOutcome, MetricsSnapshot, OtlOutcome, OtlView, TotpSetup,
-    UserView,
+    ApiTokenCreated, ApiTokenView, ClientView, GlobalDefaults, LoginOutcome, MetricsSnapshot,
+    OtlOutcome, OtlView, TotpSetup, UserView,
 };
 
 /// Live-status signal consumed by the push watcher
@@ -70,13 +70,6 @@ pub trait Backend: Send + Sync + 'static {
         &self,
         token_hash_hex: &str,
     ) -> impl Future<Output = Result<(), WebError>> + Send;
-    /// Basic auth `user:pass`; when TOTP is active the guard still refuses
-    /// upstream, with the same 401 as a wrong password (no oracle).
-    fn login_basic(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> impl Future<Output = Result<Option<UserView>, WebError>> + Send;
 
     // -- me -----------------------------------------------------------------
     fn update_me(
@@ -174,6 +167,45 @@ pub trait Backend: Send + Sync + 'static {
     // -- one-time links (public download) --------------------------------------
     fn consume_otl(&self, token: &str)
     -> impl Future<Output = Result<OtlOutcome, WebError>> + Send;
+
+    // -- api tokens (long-lived Bearer credentials) ------------------------------
+    /// Create a token for `user_id`. Returns the row view PLUS the clear
+    /// token, shown exactly once (never stored, never listed again).
+    /// `expires_at`: `None`/empty = permanent, else canonical ISO-8601.
+    fn create_api_token(
+        &self,
+        user_id: i64,
+        name: &str,
+        expires_at: Option<&str>,
+    ) -> impl Future<Output = Result<ApiTokenCreated, WebError>> + Send;
+    /// Own tokens of `user_id` (no hash, no clear token).
+    fn list_api_tokens(
+        &self,
+        user_id: i64,
+    ) -> impl Future<Output = Result<Vec<ApiTokenView>, WebError>> + Send;
+    /// Every token (ADMIN-only view).
+    fn list_all_api_tokens(
+        &self,
+    ) -> impl Future<Output = Result<Vec<ApiTokenView>, WebError>> + Send;
+    /// Revoke by id. A non-ADMIN only revokes its own rows: unknown id and
+    /// another user's id both answer `false` (anti-enumeration); ADMIN revokes any.
+    /// DB-only, never touches WireGuard (no `apply_tunnel`).
+    fn delete_api_token(
+        &self,
+        caller_id: i64,
+        is_admin: bool,
+        id: i64,
+    ) -> impl Future<Output = Result<bool, WebError>> + Send;
+    /// Bearer guard resolution: SHA-256 hex lookup, `enabled`, owner enabled,
+    /// expiry, then best-effort `lastUsedAt` touch (a touch failure never
+    /// fails a valid authentication). Fail-closed: anything unexpected is
+    /// `None`. Bearer tokens are explicit revocable credentials, so they stay
+    /// valid on 2FA accounts: they are explicit revocable credentials, not a
+    /// password bypass.
+    fn auth_api_token(
+        &self,
+        token_hash_hex: &str,
+    ) -> impl Future<Output = Result<Option<UserView>, WebError>> + Send;
 
     // -- admin ------------------------------------------------------------------
     fn get_general(&self) -> impl Future<Output = Result<Value, WebError>> + Send;

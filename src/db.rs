@@ -39,6 +39,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "004_totp_last_counter",
         include_str!("migrations/004_totp_last_counter.sql"),
     ),
+    (
+        "005_api_tokens",
+        include_str!("migrations/005_api_tokens.sql"),
+    ),
 ];
 
 /// Chemin DB par defaut (`DB_PATH`, sinon `/etc/wireguard/wg-ez.db`).

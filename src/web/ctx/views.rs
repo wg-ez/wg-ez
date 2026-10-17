@@ -145,6 +145,37 @@ pub struct OtlView {
     pub url: String,
 }
 
+/// Long-lived API token as listed by the UI + API (never the hash, never the
+/// clear token: the clear value is returned exactly once, at creation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiTokenView {
+    pub id: i64,
+    pub user_id: i64,
+    pub name: String,
+    /// ISO-8601 expiry, `None` = permanent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    /// ISO-8601 of last use, `None` = never used.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<String>,
+    pub created_at: String,
+    pub enabled: bool,
+}
+
+/// Freshly created API token: the ONLY response that ever carries the clear
+/// `token` (shown once, never stored, never listed again).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiTokenCreated {
+    pub id: i64,
+    pub name: String,
+    pub token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+    pub created_at: String,
+}
+
 /// Outcome of `GET /cnf/:token`.
 #[derive(Debug, Clone)]
 pub enum OtlOutcome {

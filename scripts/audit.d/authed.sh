@@ -43,16 +43,20 @@ qp "Q11 enable (200|404|422|401)" "/api/client/1/enable" '{}' 200 404 422 #check
 c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -b "$JAR" -c "$JAR" -X DELETE "$BASE/api/client/999999" 2>/dev/null || echo "000")
 if [ "$SESSION" = 1 ]; then inset "$c" 404 && g=ok || g="status=$c"; else inset "$c" 401 && g=ok || g="status=$c"; fi
 chk "Q12 DELETE client inconnu (404|401)" "$g" "ok" #check
-if [ -n "${AUDIT_USER:-}" ]; then
-  c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -u "$AUDIT_USER:${AUDIT_PASS:-}" "$BASE/api/session" 2>/dev/null || echo "000")
-  # With 2FA active, Basic is refused with the same 401 as a wrong password
-  # (no password-validity oracle), so 403 is no longer returned.
-  inset "$c" 200 401 && g=ok || g="status=$c"
+if [ "$SESSION" = 1 ]; then
+  # Jeton Bearer éphémère créé via la session, puis utilisé en Authorization.
+  tok=$(curl -sS --max-time 10 -b "$JAR" -c "$JAR" -H 'Content-Type: application/json' -d '{"name":"audit-q13"}' -X POST "$BASE/api/me/tokens" 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))" 2>/dev/null || true)
+  if [ -n "$tok" ]; then
+    c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H "Authorization: Bearer $tok" "$BASE/api/session" 2>/dev/null || echo "000")
+    inset "$c" 200 && g=ok || g="status=$c"
+  else
+    g="no-token"
+  fi
 else
-  c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -u 'x:y' "$BASE/api/session" 2>/dev/null || echo "000")
+  c=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 -H 'Authorization: Bearer garbage' "$BASE/api/session" 2>/dev/null || echo "000")
   inset "$c" 401 && g=ok || g="status=$c"
 fi
-chk "Q13 Basic Auth (200|401 si 2FA/mauvais mot de passe)" "$g" "ok" #check
+chk "Q13 Bearer API token (200 session, 401 sinon)" "$g" "ok" #check
 qp "Q14 password <12 rejeté (400|401)" "/api/me/password" '{"current":"x","new":"court"}' 400 #check
 qp "Q15 totp format invalide (400|401)" "/api/me/totp" '{"code":"12"}' 400 #check
 qp "Q16 client __proto__ rejeté (400|401)" "/api/client" '{"name":"__proto__"}' 400 #check

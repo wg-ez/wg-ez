@@ -37,7 +37,7 @@ pub use pages::{
     ClientPage, IndexPage, Login2faPage, LoginPage, MePage, client_detail, index, login, login_2fa,
     me,
 };
-pub use partials::{GridPartial, TotpStartPartial};
+pub use partials::{GridPartial, MeInnerPartial, TotpStartPartial};
 pub use setup::{Setup1, Setup2, Setup3, setup1, setup2, setup3};
 pub use static_files::static_file;
 

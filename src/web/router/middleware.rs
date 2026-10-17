@@ -132,7 +132,7 @@ pub(crate) async fn setup_guard<B: Backend>(
 /// - only mutating methods (`POST`/`PUT`/`PATCH`/`DELETE`) are checked; safe
 ///   methods pass so assets, the htmx long-poll and the audit keep working;
 /// - header **absent** -> allow (non-browser clients such as `curl`, the
-///   Basic API or webhooks are not CSRF targets);
+///   Bearer API or webhooks are not CSRF targets);
 /// - `same-origin` / `none` -> allow (normal app fetch/navigation and direct
 ///   address-bar or bookmark requests, reported as `none`);
 /// - anything else (`cross-site`, `same-site`, unknown) -> `403` before the

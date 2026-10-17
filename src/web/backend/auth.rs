@@ -5,8 +5,8 @@
 //! Behavior notes:
 //! - dummy Argon2 verification when the user is unknown (no account oracle);
 //! - sessions store only the SHA-256 hex of the 256-bit token;
-//! - Basic auth returns the user so the guard can refuse a 2FA account with
-//!   the same 401 as a wrong password (no password-validity oracle).
+//! - a password rotation revokes BOTH the sessions and the long-lived API
+//!   tokens of the account ([`crate::store::api_token::delete_for_user`]).
 
 use super::SqliteBackend;
 use super::common::{db_err, now_iso, user_view};
@@ -107,25 +107,6 @@ impl SqliteBackend {
         .await
     }
 
-    pub(crate) async fn login_basic_inner(
-        &self,
-        username: &str,
-        password: &str,
-    ) -> Result<Option<UserView>, WebError> {
-        if self.config.disable_password_auth {
-            return Ok(None);
-        }
-        let username = username.to_string();
-        let password = password.to_string();
-        self.with_db(move |conn| {
-            // A 2FA account is refused upstream with the same 401 as a wrong
-            // password; still return the user so the guard can apply the
-            // identical (non-oracle) answer.
-            Ok(authenticate_password(&conn, &username, &password)?.map(|u| user_view(&u)))
-        })
-        .await
-    }
-
     pub(crate) async fn update_me_inner(
         &self,
         user_id: i64,
@@ -191,10 +172,15 @@ impl SqliteBackend {
                 .map_err(|e| WebError::internal(e.to_string()))?;
             crate::store::user::set_password_hash(&conn, user_id, Some(hash.as_str()))
                 .map_err(db_err)?;
-            // Revoke every existing session: a token stolen before the
-            // password change must not survive the rotation. The caller is
-            // logged out and re-authenticates.
+            // Revoke every existing session AND every long-lived API token: a
+            // credential stolen before the password change must not survive
+            // the rotation. Without the second call a leaked `Bearer` token
+            // (permanent by default) would keep the full authority of the
+            // account — `admin.any` included — after the owner rotated the
+            // password, and could mint further tokens. The caller is logged
+            // out and re-authenticates.
             crate::store::session::delete_for_user(&conn, user_id).map_err(db_err)?;
+            crate::store::api_token::delete_for_user(&conn, user_id).map_err(db_err)?;
             Ok(())
         })
         .await
@@ -674,6 +660,71 @@ mod tests {
             })
             .await
             .expect("seed user");
+    }
+
+    /// A password rotation revokes the account's long-lived API tokens as
+    /// well as its sessions: a `Bearer` token stolen before the change must
+    /// not survive it (it is permanent by default and carries the owner's
+    /// full authority, `admin.any` included). Exercised on the real
+    /// `SqliteBackend`, the only place `change_password_inner` runs.
+    #[tokio::test]
+    async fn password_rotation_revokes_api_tokens() {
+        let backend = temp_backend("rotate-revokes-tokens");
+        seed_password_user(&backend).await;
+        let user_id = backend
+            .with_db(|conn| crate::store::user::get_by_username(&conn, "alice").map_err(db_err))
+            .await
+            .expect("query")
+            .expect("seeded")
+            .id;
+
+        let created = backend
+            .create_api_token_inner(user_id, "ci", None)
+            .await
+            .expect("create a permanent token");
+        assert!(
+            created.expires_at.is_none(),
+            "the token must be permanent for this test to mean anything"
+        );
+        let hash = crate::store::api_token::hash_token(&created.token);
+
+        // Before the rotation the token resolves the account.
+        assert_eq!(
+            backend
+                .auth_api_token_inner(&hash)
+                .await
+                .expect("auth")
+                .expect("user")
+                .id,
+            user_id
+        );
+
+        backend
+            .change_password_inner(user_id, PASSWORD, "new-password-1234")
+            .await
+            .expect("rotate");
+
+        // After the rotation: fail-closed, exactly like an unknown token.
+        assert!(
+            backend
+                .auth_api_token_inner(&hash)
+                .await
+                .expect("auth")
+                .is_none(),
+            "a stolen API token must NOT survive a password rotation"
+        );
+        backend
+            .with_db(move |conn| {
+                assert!(
+                    crate::store::api_token::list_for_user(&conn, user_id)
+                        .map_err(db_err)?
+                        .is_empty(),
+                    "no row may survive the rotation"
+                );
+                Ok(())
+            })
+            .await
+            .expect("check api_tokens");
     }
 
     /// A non-2FA password login mints a token and persists a session row
