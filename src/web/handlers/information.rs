@@ -26,7 +26,6 @@ pub async fn information<B: Backend>(
         "version": state.backend.app_version(),
         "setup": step != 0,
         "setupStep": step,
-        "insecure": state.backend.insecure(),
         "metricsPrometheus": prometheus,
         "oauthEnabled": false,
         // V1 has no in-process TLS client: always null (shape parity with v15).

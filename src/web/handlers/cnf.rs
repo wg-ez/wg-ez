@@ -10,7 +10,6 @@
 
 use axum::{
     extract::{ConnectInfo, Path, State},
-    http::HeaderMap,
     response::IntoResponse,
 };
 use serde_json::json;
@@ -20,10 +19,9 @@ use crate::web::ctx::{AppState, Backend, OtlOutcome, WebError};
 pub async fn download<B: Backend>(
     State(state): State<AppState<B>>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
-    headers: HeaderMap,
     Path(token): Path<String>,
 ) -> Result<impl IntoResponse, WebError> {
-    let ip = super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     if !state.limits.check_cnf(ip).await {
         return Err(WebError::rate_limited("too many requests"));
     }

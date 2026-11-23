@@ -4,7 +4,6 @@
 //! utilisateur (`panic = "abort"` en release).
 
 use std::collections::HashMap;
-use std::net::IpAddr;
 
 use ipnet::IpNet;
 
@@ -78,44 +77,6 @@ pub fn validate_interface(value: &str) -> Result<(), ConfigError> {
         ));
     }
     Ok(())
-}
-
-/// `TRUSTED_PROXIES` : CSV d'IP et de CIDR ; invalide = refus de boot.
-pub fn parse_trusted_proxies(value: &str) -> Result<Vec<IpNet>, ConfigError> {
-    const KEY: &str = "TRUSTED_PROXIES";
-    let mut out = Vec::new();
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return Ok(out);
-    }
-    for part in trimmed.split(',') {
-        let item = part.trim();
-        if item.is_empty() {
-            continue;
-        }
-        // Accepte une IP nue (promue en /32 ou /128) ou un CIDR.
-        let net = match item.parse::<IpNet>() {
-            Ok(n) => n,
-            Err(_) => match item.parse::<IpAddr>() {
-                Ok(IpAddr::V4(a)) => match ipnet::Ipv4Net::new(a, 32) {
-                    Ok(n) => IpNet::V4(n),
-                    Err(e) => return Err(ConfigError::Invalid(KEY, e.to_string())),
-                },
-                Ok(IpAddr::V6(a)) => match ipnet::Ipv6Net::new(a, 128) {
-                    Ok(n) => IpNet::V6(n),
-                    Err(e) => return Err(ConfigError::Invalid(KEY, e.to_string())),
-                },
-                Err(_) => {
-                    return Err(ConfigError::Invalid(
-                        KEY,
-                        format!("'{item}' is neither an IP nor a CIDR"),
-                    ));
-                }
-            },
-        };
-        out.push(net);
-    }
-    Ok(out)
 }
 
 pub(crate) fn parse_csv_list(key: &'static str, value: &str) -> Result<Vec<String>, ConfigError> {

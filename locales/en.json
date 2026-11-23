@@ -22,9 +22,6 @@
     "language": "Language",
     "menu": "Menu"
   },
-  "banner": {
-    "insecure": "Insecure: the UI is served over plain HTTP. Use HTTPS via a reverse proxy."
-  },
   "clients": {
     "title": "Clients",
     "search_placeholder": "Search clients…",

@@ -66,5 +66,9 @@ pub(crate) fn validate_host_port(host: &str, port: i64) -> Result<(String, i64),
 
 /// Setup is finished when `setup_step == 0`.
 pub const SETUP_DONE: i64 = 0;
+/// Endpoint step. An admin already exists (step 2 minted it), so `/login`
+/// must stay reachable: a lost/refused session cookie must not dead-end the
+/// wizard.
+pub const SETUP_ENDPOINT: i64 = 3;
 /// Display name given to setup-created admins.
 pub const ADMIN_DISPLAY_NAME: &str = "Administrator";

@@ -17,8 +17,9 @@ The host provides **only Docker + Compose**. There is no host cargo/rust/node.
 - Settings default to working values; overrides go in an optional
   `environment:` block (see README), no `.env` file. The UI port is the left
   side of the ports mapping.
-  For plain-HTTP access set `INSECURE=true`; otherwise the `Secure` session cookie
-  is refused by the browser and login appears to succeed then bounces to `/login`.
+  The session cookie's `Secure` flag follows the browser-reported scheme
+  (`Origin`/`Referer`), so plain HTTP and HTTPS-via-proxy both work with no
+  extra setting; HSTS is always emitted (browsers ignore it over HTTP).
 - **No command writes into the source tree.** Builds, tests, lint, CSS and the HTTP
   audit all run inside Docker build stages (`docker build -f docker/Dockerfile --target …`) or dev
   compose services; the cargo cache lives in a BuildKit cache mount, never in

@@ -182,10 +182,7 @@ pub fn build_router<B: Backend>(state: AppState<B>) -> Router {
         .layer(middleware::from_fn(normalize_path))
         .layer(middleware::from_fn_with_state(state.clone(), setup_guard))
         .layer(middleware::from_fn(csrf_guard))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            security_headers,
-        ))
+        .layer(middleware::from_fn(security_headers))
         .layer(
             TraceLayer::new_for_http().make_span_with(|request: &Request| {
                 // Never record `uri`: `/cnf/<token>` carries a one-time secret.

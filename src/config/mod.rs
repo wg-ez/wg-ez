@@ -10,11 +10,6 @@
 //! - `WG_INTERFACE` : 1..=15 caracteres dans `[a-zA-Z0-9_=+.-]`.
 //! - `PASSWORD` / `PASSWORD_HASH` (v14) refusent le boot avec un pointeur vers
 //!   le guide de migration v14 -> v15.
-//! - `TRUSTED_PROXIES` : CSV d'IP et de CIDR, vide par defaut ; toute valeur
-//!   invalide refuse le boot. Seuls ces proxys autorisent `X-Forwarded-For`.
-//!   `X-Forwarded-Host` n'est jamais honore (pas de routage par hote) et
-//!   `X-Forwarded-Proto` non plus (le protocole reel est dicte uniquement par
-//!   `INSECURE`).
 //! - `INIT_ENABLED` exige le groupe 1 (`INIT_USERNAME`, `INIT_PASSWORD` de 12+
 //!   caracteres, `INIT_HOST`, `INIT_PORT`) plus les groupes optionnels
 //!   DNS / CIDR / AllowedIPs.
@@ -25,7 +20,7 @@ mod init;
 mod parse;
 mod types;
 
-pub use parse::{parse_trusted_proxies, validate_interface};
+pub use parse::validate_interface;
 pub use types::{AppConfig, ConfigError, InitConfig};
 
 use std::collections::HashMap;
@@ -241,7 +236,6 @@ impl AppConfig {
     /// Variante pure (tests) : valide une map au lieu du process.
     pub fn load_from(env: &HashMap<String, String>) -> Result<Self, ConfigError> {
         // `EXPERIMENTAL_AWG`, `OVERRIDE_AUTO_AWG`, `OAUTH_*` : ignorees (V1).
-        // `X-Forwarded-Proto` : jamais honore, donc jamais lu ici.
 
         if env.get("PASSWORD").is_some_and(|v| !v.trim().is_empty()) {
             return Err(ConfigError::Legacy(
@@ -277,11 +271,6 @@ impl AppConfig {
         };
         validate_interface(&wg_interface)?;
 
-        let trusted_proxies = match raw(env, "TRUSTED_PROXIES") {
-            Some(v) => parse_trusted_proxies(&v)?,
-            None => Vec::new(),
-        };
-
         let init_enabled = parse_bool_default(env, "INIT_ENABLED", false)?;
         let init = if init_enabled {
             Some(load_init(env)?)
@@ -307,12 +296,10 @@ impl AppConfig {
         Ok(Self {
             host,
             port,
-            insecure: parse_bool_default(env, "INSECURE", false)?,
             disable_ipv6,
             disable_ipv4,
             disable_password_auth: parse_bool_default(env, "DISABLE_PASSWORD_AUTH", false)?,
             wg_interface,
-            trusted_proxies,
             db_path,
             wg_conf_dir,
             init,
@@ -385,22 +372,6 @@ mod tests {
         assert!(matches!(
             AppConfig::load_from(&env(&[("PORT", "51821"), ("WG_INTERFACE", "wg0!")])),
             Err(ConfigError::Invalid("WG_INTERFACE", _))
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn trusted_proxies_csv() -> Result<(), ConfigError> {
-        let cfg = AppConfig::load_from(&env(&[("PORT", "51821")]))?;
-        assert!(cfg.trusted_proxies.is_empty());
-        let cfg = AppConfig::load_from(&env(&[
-            ("PORT", "51821"),
-            ("TRUSTED_PROXIES", "10.0.0.1, 192.168.0.0/16, ::1"),
-        ]))?;
-        assert_eq!(cfg.trusted_proxies.len(), 3);
-        assert!(matches!(
-            AppConfig::load_from(&env(&[("PORT", "51821"), ("TRUSTED_PROXIES", "nope")])),
-            Err(ConfigError::Invalid("TRUSTED_PROXIES", _))
         ));
         Ok(())
     }
@@ -482,7 +453,6 @@ mod tests {
     fn host_and_bool_defaults() -> Result<(), ConfigError> {
         let cfg = AppConfig::load_from(&env(&[("PORT", "51821"), ("IP_MODE", "both")]))?;
         assert_eq!(cfg.host, "0.0.0.0");
-        assert!(!cfg.insecure);
         assert!(!cfg.disable_ipv6);
         assert!(!cfg.disable_ipv4);
         assert!(!cfg.disable_password_auth);

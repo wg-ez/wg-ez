@@ -8,7 +8,6 @@ All settings are environment variables, read once at boot. No `environment:` blo
 services:
   wg-ez:
     environment:
-      INSECURE: "true"
       INIT_ENABLED: "true"
       INIT_USERNAME: admin
       INIT_PASSWORD: change-me-to-12-chars-min
@@ -21,10 +20,8 @@ services:
 | `HOST` | `0.0.0.0` | Bind address inside the container. |
 | `PORT` | `51821` | Listen port inside the container (right side of the ports mapping). |
 | host port mapping | `51821` | Left side of `"51821:51821/tcp"`; change it to remap the UI port. |
-| `INSECURE` | `false` | `true` for plain HTTP (LAN without reverse proxy). Otherwise the `Secure` cookie is refused and login loops back to `/login`. Keep `false` behind HTTPS. |
 | `IP_MODE` | `auto` | `auto` (detect from container routes) \| `ipv4` \| `ipv6` \| `both`. |
 | `WG_INTERFACE` | `wg0` | WireGuard interface name. |
-| `TRUSTED_PROXIES` | — | CSV of IPs/CIDRs allowed to set `X-Forwarded-For`. |
 | `DISABLE_PASSWORD_AUTH` | `false` | Disable password login (SSO / hardware-key setups). |
 | `INIT_ENABLED` | `false` | `true` = create the admin at first boot, no web wizard. |
 | `INIT_USERNAME` / `INIT_PASSWORD` | — | Admin credentials (12+ chars). Required with `INIT_ENABLED`. |
@@ -38,7 +35,7 @@ Legacy `PASSWORD` / `PASSWORD_HASH` (wg-easy v14 style) are refused at boot — 
 
 ## Reverse proxy
 
-Terminate TLS in front (Caddy, Traefik, nginx…). Keep `INSECURE=false`, forward to `51821/tcp`, and set `TRUSTED_PROXIES` to your proxy's IP/CIDR.
+Terminate TLS in front (Caddy, Traefik, nginx…). The browser-visible HTTPS scheme keeps the session cookie `Secure`; forward to `51821/tcp`.
 
 ## Rescue CLI
 

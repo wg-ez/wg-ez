@@ -68,8 +68,6 @@ pub struct AppConfig {
     pub host: String,
     /// Port d'ecoute (`PORT`, requis).
     pub port: u16,
-    /// `INSECURE=true` autorise cookies non-`secure` et HTTP (defaut false).
-    pub insecure: bool,
     /// `IP_MODE=ipv4` : retire adresses et regles IPv6.
     pub disable_ipv6: bool,
     /// `IP_MODE=ipv6` : retire adresses et regles IPv4.
@@ -78,8 +76,6 @@ pub struct AppConfig {
     pub disable_password_auth: bool,
     /// Nom d'interface WireGuard (`WG_INTERFACE`, defaut `wg0`).
     pub wg_interface: String,
-    /// Proxys autorises a fournir `X-Forwarded-For` (seule en-tete honoree).
-    pub trusted_proxies: Vec<IpNet>,
     /// Chemin SQLite (`DB_PATH`, defaut `/etc/wireguard/wg-ez.db`).
     pub db_path: String,
     /// Dossier des `.conf` (`WG_CONF_DIR`, defaut `/etc/wireguard`).
@@ -128,12 +124,10 @@ mod tests {
         let app = AppConfig {
             host: "0.0.0.0".to_string(),
             port: 51821,
-            insecure: false,
             disable_ipv6: false,
             disable_ipv4: false,
             disable_password_auth: false,
             wg_interface: "wg0".to_string(),
-            trusted_proxies: vec![],
             db_path: "/etc/wireguard/wg-ez.db".to_string(),
             wg_conf_dir: "/etc/wireguard".to_string(),
             init: Some(sample_init()),

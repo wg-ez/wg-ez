@@ -45,7 +45,7 @@ pub async fn delete<B: Backend>(
     if let Some(token) = jar.get(SESSION_COOKIE).map(|c| c.value().to_owned()) {
         state.backend.destroy_session(&hash_token(&token)).await?;
     }
-    let c = crate::auth::session::build_clear_cookie(!state.backend.insecure());
+    let c = crate::auth::session::build_clear_cookie(super::cookie_secure(&headers));
     let resp = ([(header::SET_COOKIE, c)], Json(json!({ "ok": true }))).into_response();
     Ok(with_hx(resp, &headers, Some("/login"), None))
 }

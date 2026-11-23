@@ -93,21 +93,10 @@
 <button class="nav__cta" type="button" data-do="new" data-n="{{ name }}">{{ label }}</button>
 {%- endmacro %}
 
-{# Bandeau d'info pleine largeur (etat HTTP clair).
-
-   `banner` / `banner--warn` vs `panel--danger` : NE PAS FUSIONNER. Les
-   `banner*` vivent HORS `.frame` (bandeaux globaux du shell) ; `panel--danger`
-   est un PANNEAU de formulaire DANS `.page`. Changer l'un en l'autre
-   deplacerait le message hors/dans le cadre et briserait la grille de filets. #}
-{% macro banner(text) -%}
-<div class="banner">
-  <p class="banner__text">{{ text }}</p>
-</div>
-{%- endmacro %}
-
-{# Bandeau d'alerte pleine largeur (mot de passe desactive). Meme NOTE
-   `banner` vs `panel--danger` : hors cadre ici, jamais un panneau de
-   formulaire. #}
+{# Bandeau d'alerte pleine largeur (mot de passe desactive). `banner` vit
+   HORS `.frame` (bandeau global du shell), jamais un panneau de formulaire
+   DANS `.page` : changer l'un en l'autre deplacerait le message hors/dans le
+   cadre et briserait la grille de filets. #}
 {% macro banner_warn(text) -%}
 <div class="banner banner--warn">
   <p class="banner__text">{{ text }}</p>

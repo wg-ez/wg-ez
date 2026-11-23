@@ -36,8 +36,6 @@ pub struct StatusSignal {
 pub trait Backend: Send + Sync + 'static {
     // -- meta -------------------------------------------------------------
     fn app_version(&self) -> String;
-    /// `INSECURE` env: true => plain HTTP banner + non-secure cookies.
-    fn insecure(&self) -> bool;
     /// Setup step; `0` = finished.
     fn setup_step(&self) -> impl Future<Output = Result<i64, WebError>> + Send;
 

@@ -90,7 +90,7 @@ pub async fn index<B: Backend>(
     headers: HeaderMap,
     Query(q): Query<LangQuery>,
 ) -> Result<Response, WebError> {
-    let ip = super::super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     let (prefs, me) = match page_context(&state, &jar, &headers, Some(ip), q.prefs()).await {
         Ok(ctx) => ctx,
         Err(r) => return Ok(*r),
@@ -200,7 +200,7 @@ pub async fn client_detail<B: Backend>(
     Path(id): Path<i64>,
     Query(q): Query<LangQuery>,
 ) -> Result<Response, WebError> {
-    let ip = super::super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     let (prefs, auth) = match page_context(&state, &jar, &headers, Some(ip), q.prefs()).await {
         Ok(ctx) => ctx,
         Err(r) => return Ok(*r),
@@ -340,7 +340,7 @@ pub async fn me<B: Backend>(
     headers: HeaderMap,
     Query(q): Query<LangQuery>,
 ) -> Result<Response, WebError> {
-    let ip = super::super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     let (prefs, auth) = match page_context(&state, &jar, &headers, Some(ip), q.prefs()).await {
         Ok(ctx) => ctx,
         Err(r) => return Ok(*r),
@@ -399,7 +399,7 @@ pub async fn login<B: Backend>(
 ) -> Result<Response, WebError> {
     let prefs = page_prefs(&state, &jar, &headers, q.prefs());
     let (lang, theme, set) = (prefs.lang, prefs.theme, prefs.set);
-    let ip = super::super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     if authenticate(&state, &jar, &headers, Some(ip)).await.is_ok() {
         return Ok(redirect("/", &set));
     }

@@ -133,7 +133,7 @@ pub async fn create<B: Backend>(
     headers: HeaderMap,
     JsonOrForm(body): JsonOrForm<CreateBody>,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     check(&auth, "clients.create", None)?;
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 64 {
@@ -188,7 +188,7 @@ pub async fn update<B: Backend>(
     Path(id): Path<i64>,
     PatchBody { patch, is_json }: PatchBody,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     load_client(&state, &auth, id, "clients.update").await?;
     reject_admin_only_patch_keys(&patch, &auth)?;
     let patch = coerce_patch(
@@ -211,7 +211,7 @@ pub async fn delete<B: Backend>(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     load_client(&state, &auth, id, "clients.delete").await?;
     state.backend.delete_client(id).await?;
     state.backend.apply_tunnel().await?;
@@ -255,7 +255,7 @@ async fn set_enabled<B: Backend>(
     id: i64,
     enabled: bool,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     load_client(&state, &auth, id, "clients.update").await?;
     let client = if enabled {
         state.backend.enable_client(id).await?
@@ -307,7 +307,7 @@ async fn set_psk<B: Backend>(
     id: i64,
     enabled: bool,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     load_client(&state, &auth, id, "clients.update").await?;
     let client = state.backend.set_client_psk(id, enabled).await?;
     state.backend.apply_tunnel().await?;
@@ -324,7 +324,7 @@ pub async fn rotate_keys<B: Backend>(
     headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     load_client(&state, &auth, id, "clients.update").await?;
     let client = state.backend.rotate_client_keys(id).await?;
     state.backend.apply_tunnel().await?;

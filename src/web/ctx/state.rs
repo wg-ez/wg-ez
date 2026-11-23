@@ -1,7 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Shared request state: pending 2FA logins, rate limits, `AppState`, and
-//! trusted-proxy client-IP resolution.
+//! Shared request state: pending 2FA logins, rate limits and `AppState`.
 
 use std::{
     collections::{HashMap, VecDeque},
@@ -10,7 +9,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-use ipnet::IpNet;
 use tokio::sync::Mutex;
 
 use super::backend_trait::Backend;
@@ -74,11 +72,10 @@ pub fn insert_pending(map: &mut HashMap<String, PendingLogin>, id: String, entry
 /// In-memory rate limiter: sliding window of attempt instants per key.
 ///
 /// The password login keeps **two** independent windows (M1): a fine one per
-/// `(IP, username)` and a coarse one per IP. Without the per-account key, a
-/// deployment behind an undeclared reverse proxy (empty `TRUSTED_PROXIES`)
-/// would resolve every request to the proxy IP, so ten failures on any
-/// account locked out **every** user of the instance. The coarse per-IP
-/// bucket still bounds credential spraying across many usernames.
+/// `(IP, username)` and a coarse one per IP. The per-account key means ten
+/// failures on one account cannot lock out **every** user of the instance.
+/// The coarse per-IP bucket still bounds credential spraying across many
+/// usernames.
 #[derive(Debug, Default)]
 pub struct RateLimits {
     /// Coarse login bound, per IP (shared with `verify-2fa`, see the handler).
@@ -122,11 +119,10 @@ const MAX_RATE_BUCKETS: usize = 4096;
 /// so its `back` is a bucket's most recent use — until we are back under the
 /// bound.
 ///
-/// Trade-off: an attacker holding a very large number of **real** IPs (the
-/// `X-Forwarded-For` chain is not spoofable unless the request comes from a
-/// declared `TRUSTED_PROXIES` hop) can evict *another* bucket by aging it out.
-/// That is acceptable: per-IP limiting is weak against a botnet anyway, and the
-/// bound is what protects process RSS from an unbounded map.
+/// Trade-off: an attacker holding a very large number of **real** IPs can
+/// evict *another* bucket by aging it out. That is acceptable: per-IP limiting
+/// is weak against a botnet anyway, and the bound is what protects process RSS
+/// from an unbounded map.
 fn bound_buckets<K>(map: &mut HashMap<K, VecDeque<Instant>>, now: Instant, window: Duration)
 where
     K: Eq + std::hash::Hash + Clone,
@@ -346,10 +342,6 @@ pub struct AppState<B: Backend> {
     /// Push watcher for the live topbar count + grid long-poll
     /// (`GET /api/status/stream`).
     pub watcher: StatusWatcher<B>,
-    /// Trusted proxies for `X-Forwarded-For` (CSV IP/CIDR at boot).
-    /// `X-Forwarded-Host` is never honored (no virtual-host routing) and
-    /// `X-Forwarded-Proto` is never honored (protocol comes from INSECURE).
-    pub trusted_proxies: Arc<Vec<IpNet>>,
 }
 
 impl<B: Backend> Clone for AppState<B> {
@@ -360,13 +352,12 @@ impl<B: Backend> Clone for AppState<B> {
             pending: self.pending.clone(),
             limits: self.limits.clone(),
             watcher: self.watcher.clone(),
-            trusted_proxies: self.trusted_proxies.clone(),
         }
     }
 }
 
 impl<B: Backend> AppState<B> {
-    pub fn new(backend: Arc<B>, locales: Locales, trusted_proxies: Vec<IpNet>) -> Self {
+    pub fn new(backend: Arc<B>, locales: Locales) -> Self {
         let watcher = StatusWatcher::new(backend.clone());
         Self {
             backend,
@@ -374,31 +365,7 @@ impl<B: Backend> AppState<B> {
             pending: Arc::new(Mutex::new(HashMap::new())),
             limits: Arc::new(RateLimits::default()),
             watcher,
-            trusted_proxies: Arc::new(trusted_proxies),
         }
-    }
-
-    /// Client IP: direct peer unless it is a trusted proxy. When it is, walk
-    /// `X-Forwarded-For` from the right and return the first non-trusted hop,
-    /// so a client-supplied leftmost prefix (typical `$proxy_add_x_forwarded_for`
-    /// append) can never spoof the rate-limit identity. Invalid/untrustworthy
-    /// chains fail closed to the direct peer.
-    pub fn client_ip(&self, direct: Option<IpAddr>, forwarded_for: Option<&str>) -> Option<IpAddr> {
-        let direct = direct?;
-        if !proxy_trusted(&self.trusted_proxies, direct) {
-            return Some(direct);
-        }
-        let Some(ff) = forwarded_for else {
-            return Some(direct);
-        };
-        for hop in ff.rsplit(',').map(str::trim).filter(|s| !s.is_empty()) {
-            match hop.parse::<IpAddr>() {
-                Ok(ip) if !proxy_trusted(&self.trusted_proxies, ip) => return Some(ip),
-                Ok(_) => continue,
-                Err(_) => break,
-            }
-        }
-        Some(direct)
     }
 }
 
@@ -417,25 +384,9 @@ fn normalize_username(username: &str) -> String {
     username.trim().chars().take(256).collect()
 }
 
-fn proxy_trusted(proxies: &[IpNet], peer: IpAddr) -> bool {
-    proxies.iter().any(|net| net.contains(&peer))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn forwarded_headers_only_from_trusted_proxies() {
-        let proxies = vec![
-            "10.0.0.1/32".parse().unwrap(),
-            "192.168.0.0/24".parse().unwrap(),
-        ];
-        assert!(proxy_trusted(&proxies, "10.0.0.1".parse().unwrap()));
-        assert!(proxy_trusted(&proxies, "192.168.0.55".parse().unwrap()));
-        assert!(!proxy_trusted(&proxies, "192.168.1.1".parse().unwrap()));
-        assert!(!proxy_trusted(&[], "10.0.0.1".parse().unwrap()));
-    }
 
     /// M2: a wrong TOTP code must count against the pending's attempt budget
     /// without dropping it until the cap is reached; the 5th failure reports

@@ -81,9 +81,9 @@ use common::{
 /// `async fn $name(..) -> $ret { self.$inner(..).await }`.
 ///
 /// Only the pure one-line delegations to a `*_inner` method live here. The
-/// synchronous getters (`app_version`, `insecure`,
-/// `ipv4_enabled`, `ipv6_enabled`) and the two async methods that carry real
-/// logic (`apply_tunnel`, `status_signal`) stay handwritten in the impl below.
+/// synchronous getters (`app_version`, `ipv4_enabled`, `ipv6_enabled`) and the
+/// two async methods that carry real logic (`apply_tunnel`, `status_signal`)
+/// stay handwritten in the impl below.
 macro_rules! forward_async {
     ($(fn $name:ident($($arg:ident : $ty:ty),* $(,)?) -> $ret:ty => $inner:ident;)*) => {
         $(
@@ -211,10 +211,6 @@ impl SqliteBackend {
 impl Backend for SqliteBackend {
     fn app_version(&self) -> String {
         crate::VERSION.to_string()
-    }
-
-    fn insecure(&self) -> bool {
-        self.config.insecure
     }
 
     forward_async! {

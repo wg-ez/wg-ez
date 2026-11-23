@@ -31,9 +31,6 @@ use tower::ServiceExt;
 #[derive(Debug, Default)]
 pub struct TestBackend {
     pub setup_step: i64,
-    /// `INSECURE` flag backing [`Backend::insecure`]: drives the `Secure`
-    /// attribute of the session AND pending-2FA cookies (M8).
-    pub insecure: bool,
     pub metrics: std::sync::Mutex<(bool, bool)>,
     /// Test-only "stored hash": the clear Bearer itself (production stores an
     /// Argon2 hash). Router tests only need presence + comparison semantics.
@@ -47,21 +44,10 @@ pub struct TestBackend {
     pub disabled_users: std::sync::Mutex<Vec<i64>>,
 }
 
-/// Construct a [`TestBackend`] with the given flags/password.
+/// Construct a [`TestBackend`] with the given setup step/metrics/password.
 fn backend(setup_step: i64, metrics: (bool, bool), password: Option<&str>) -> TestBackend {
-    backend_with_insecure(setup_step, metrics, password, true)
-}
-
-/// Same as [`backend`] but with an explicit `INSECURE` flag.
-fn backend_with_insecure(
-    setup_step: i64,
-    metrics: (bool, bool),
-    password: Option<&str>,
-    insecure: bool,
-) -> TestBackend {
     TestBackend {
         setup_step,
-        insecure,
         metrics: std::sync::Mutex::new(metrics),
         metrics_password: std::sync::Mutex::new(password.map(str::to_string)),
         api_tokens: std::sync::Mutex::new(Vec::new()),
@@ -177,9 +163,6 @@ fn unique_conflict_error() -> rusqlite::Error {
 impl Backend for TestBackend {
     fn app_version(&self) -> String {
         "0.0.0-test".into()
-    }
-    fn insecure(&self) -> bool {
-        self.insecure
     }
     async fn setup_step(&self) -> Result<i64, WebError> {
         Ok(self.setup_step)
@@ -653,7 +636,6 @@ pub fn test_state() -> AppState<TestBackend> {
     AppState::new(
         Arc::new(backend(1, (true, true), Some("scrape-secret"))),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     )
 }
 
@@ -661,7 +643,6 @@ pub fn finished_state() -> AppState<TestBackend> {
     AppState::new(
         Arc::new(backend(0, (true, true), Some("scrape-secret"))),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     )
 }
 
@@ -672,22 +653,15 @@ pub fn setup_step3_state() -> AppState<TestBackend> {
     AppState::new(
         Arc::new(backend(3, (true, true), Some("scrape-secret"))),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     )
 }
 
-/// Finished setup with an explicit `INSECURE` flag, for the M8 cookie-flag
-/// tests (`Secure` present iff `!INSECURE`).
-pub fn insecure_state(insecure: bool) -> AppState<TestBackend> {
+/// Setup mid-flight at step 1: exercises the step-2 cookie minting before any
+/// admin/session exists.
+pub fn setup_step1_state() -> AppState<TestBackend> {
     AppState::new(
-        Arc::new(backend_with_insecure(
-            0,
-            (true, true),
-            Some("scrape-secret"),
-            insecure,
-        )),
+        Arc::new(backend(1, (true, true), Some("scrape-secret"))),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     )
 }
 
@@ -854,12 +828,27 @@ async fn post_json(
     cookie: Option<&str>,
     body: &str,
 ) -> (StatusCode, HeaderMap, String) {
+    post_json_headers(app, uri, cookie, body, &[]).await
+}
+
+/// Same as [`post_json`] with extra request headers (e.g. `Origin`), used to
+/// prove the per-request `Secure` cookie decision.
+async fn post_json_headers(
+    app: Router,
+    uri: &str,
+    cookie: Option<&str>,
+    body: &str,
+    extra: &[(&str, &str)],
+) -> (StatusCode, HeaderMap, String) {
     let mut b = Request::builder()
         .method("POST")
         .uri(uri)
         .header("content-type", "application/json");
     if let Some(c) = cookie {
         b = b.header("cookie", c);
+    }
+    for (k, v) in extra {
+        b = b.header(*k, *v);
     }
     let mut built = b.body(Body::from(body.to_owned())).unwrap();
     built
@@ -903,6 +892,51 @@ async fn setup_step2_mints_admin_session_cookie() {
     assert!(
         cookie.contains("SameSite=Lax"),
         "cookie SameSite: {cookie:?}"
+    );
+}
+
+/// Regression: a plain-HTTP browser must receive a cookie it will actually
+/// store. Step 3 is admin-gated, so a `Secure` cookie over HTTP used to 401
+/// the wizard forever (`authentication required`).
+#[tokio::test]
+async fn setup_step2_cookie_is_not_secure_on_http_origin() {
+    let app = build_router(setup_step1_state());
+    let (s, h, _) = post_json_headers(
+        app,
+        "/api/setup/2",
+        None,
+        r#"{"username":"admin","password":"long-enough-12"}"#,
+        &[("origin", "http://vpn.example.com")],
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let cookie = set_cookie(&h);
+    assert!(cookie.starts_with("wg-ez="), "cookie manquant: {cookie:?}");
+    assert!(
+        !cookie.contains("Secure"),
+        "un navigateur HTTP refuse un cookie Secure: {cookie:?}"
+    );
+}
+
+/// Symmetric case: the same step behind a browser-visible HTTPS origin keeps
+/// `Secure`.
+#[tokio::test]
+async fn setup_step2_cookie_is_secure_on_https_origin() {
+    let app = build_router(setup_step1_state());
+    let (s, h, _) = post_json_headers(
+        app,
+        "/api/setup/2",
+        None,
+        r#"{"username":"admin","password":"long-enough-12"}"#,
+        &[("origin", "https://vpn.example.com")],
+    )
+    .await;
+    assert_eq!(s, StatusCode::OK);
+    let cookie = set_cookie(&h);
+    assert!(cookie.starts_with("wg-ez="), "cookie manquant: {cookie:?}");
+    assert!(
+        cookie.contains("; Secure"),
+        "HTTPS doit conserver Secure: {cookie:?}"
     );
 }
 
@@ -996,7 +1030,7 @@ async fn csp_headers_present_no_inline() {
 /// disparaissent.
 #[tokio::test]
 async fn security_headers_present_on_authenticated_page() {
-    let app = build_router(insecure_state(false));
+    let app = build_router(finished_state());
     let (s, h, _) = req(app, "GET", "/", Some("wg-ez=valid")).await;
     assert_eq!(s, StatusCode::OK);
 
@@ -1045,36 +1079,26 @@ async fn security_headers_present_on_authenticated_page() {
     );
 }
 
-/// M9 : HSTS est conditionnel à `!INSECURE`. En HTTPS il est posé avec la
-/// longue durée partagée ; en HTTP il est **absent** (sinon le navigateur
-/// forcerait HTTPS et casserait le déploiement `INSECURE=true`).
+/// M9 : HSTS est posé sur toutes les réponses. Un navigateur l'ignore en
+/// HTTP clair ; en HTTPS il protège le proxy.
 #[tokio::test]
-async fn hsts_present_only_when_https() {
-    let app = build_router(insecure_state(false));
+async fn hsts_is_always_present() {
+    let app = build_router(finished_state());
     let (s, h, _) = req(app, "GET", "/", Some("wg-ez=valid")).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(
         h.get("strict-transport-security")
             .and_then(|v| v.to_str().ok()),
         Some("max-age=31536000; includeSubDomains"),
-        "HTTPS doit porter HSTS"
-    );
-
-    let app = build_router(insecure_state(true));
-    let (s2, h2, _) = req(app, "GET", "/", Some("wg-ez=valid")).await;
-    assert_eq!(s2, StatusCode::OK);
-    assert!(
-        !h2.contains_key("strict-transport-security"),
-        "HTTP ne doit JAMAIS porter HSTS"
     );
 }
 
 /// M9 : les assets `static/` passent par le middleware global et reçoivent
-/// donc les en-têtes de sécurité, mais gardent leur `Cache-Control` I7, ne
-/// reçoivent pas de `Vary: Cookie` et — en HTTP — aucun HSTS incohérent.
+/// donc les en-têtes de sécurité, mais gardent leur `Cache-Control` I7 et ne
+/// reçoivent pas de `Vary: Cookie`.
 #[tokio::test]
-async fn static_assets_get_security_headers_without_hsts_in_http() {
-    let app = build_router(insecure_state(true));
+async fn static_assets_keep_cache_policy_with_security_headers() {
+    let app = build_router(finished_state());
     let (s, h, _) = req(app, "GET", "/static/js/app.js", None).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(
@@ -1082,9 +1106,10 @@ async fn static_assets_get_security_headers_without_hsts_in_http() {
             .and_then(|v| v.to_str().ok()),
         Some("nosniff")
     );
-    assert!(
-        !h.contains_key("strict-transport-security"),
-        "asset en HTTP : pas de HSTS"
+    assert_eq!(
+        h.get("strict-transport-security")
+            .and_then(|v| v.to_str().ok()),
+        Some("max-age=31536000; includeSubDomains")
     );
     assert!(!h.contains_key("vary"), "assets sans Vary: Cookie");
     let cc = h
@@ -1232,7 +1257,6 @@ async fn metrics_disabled_400() {
     let state = AppState::new(
         Arc::new(backend(0, (false, false), Some("scrape-secret"))),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     );
     let app = build_router(state);
     // v15 answers 400 (not 404) when the endpoint is disabled.
@@ -1291,7 +1315,6 @@ async fn metrics_require_bearer_and_password_is_never_exposed() {
     let state = AppState::new(
         Arc::new(backend(0, (false, false), None)),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     );
     let app = build_router(state);
 
@@ -2730,8 +2753,8 @@ async fn unknown_or_expired_pending_is_401() {
 }
 
 // ---------------------------------------------------------------------------
-// M8 — the pending-2FA cookie must carry `Secure` iff `!INSECURE`, exactly
-// like the session cookie. Otherwise the opaque pending id can leak over a
+// M8 — the pending-2FA cookie uses the same per-request `Secure` decision as
+// the session cookie. Otherwise the opaque pending id can leak over a
 // cleartext request on an HTTPS deployment.
 // ---------------------------------------------------------------------------
 
@@ -2760,16 +2783,17 @@ fn set_cookie_value(h: &HeaderMap, name: &str) -> Option<String> {
     (k.trim() == name).then(|| v.trim().to_owned())
 }
 
-/// `POST /api/auth/password` on a 2FA account: with `INSECURE=false` the
+/// `POST /api/auth/password` on a 2FA account with an HTTPS origin: the
 /// pending cookie MUST be `Secure` (same rule as `wg-ez`).
 #[tokio::test]
-async fn pending_cookie_is_secure_when_https() {
-    let app = build_router(insecure_state(false));
-    let (s, h, body) = post_json(
+async fn pending_cookie_is_secure_on_https_origin() {
+    let app = build_router(finished_state());
+    let (s, h, body) = post_json_headers(
         app,
         "/api/auth/password",
         None,
         r#"{"username":"totp","password":"whatever"}"#,
+        &[("origin", "https://vpn.example.com")],
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{body}");
@@ -2788,16 +2812,17 @@ async fn pending_cookie_is_secure_when_https() {
     assert!(cookie.contains("Max-Age=300"), "{cookie:?}");
 }
 
-/// Symmetric case: with `INSECURE=true` the pending cookie has no `Secure`
-/// (the deployment is plain HTTP, forcing the flag would drop the cookie).
+/// Symmetric case: a browser on `http://` gets no `Secure` (it would drop the
+/// pending cookie and break the 2FA flow).
 #[tokio::test]
-async fn pending_cookie_is_not_secure_when_insecure() {
-    let app = build_router(insecure_state(true));
-    let (s, h, body) = post_json(
+async fn pending_cookie_is_not_secure_on_http_origin() {
+    let app = build_router(finished_state());
+    let (s, h, body) = post_json_headers(
         app,
         "/api/auth/password",
         None,
         r#"{"username":"totp","password":"whatever"}"#,
+        &[("origin", "http://vpn.example.com")],
     )
     .await;
     assert_eq!(s, StatusCode::OK, "{body}");
@@ -3233,7 +3258,6 @@ fn token_state() -> (Router, Arc<TestBackend>) {
     let state = AppState::new(
         backend.clone(),
         crate::web::ctx::Locales::load().expect("locales"),
-        vec![],
     );
     (build_router(state), backend)
 }

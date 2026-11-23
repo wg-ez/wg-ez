@@ -47,7 +47,7 @@ pub async fn stream<B: Backend>(
     jar: CookieJar,
     headers: HeaderMap,
 ) -> Result<Response, WebError> {
-    let ip = super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     if authenticate(&state, &jar, &headers, Some(ip))
         .await
         .is_err()

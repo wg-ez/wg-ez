@@ -36,7 +36,7 @@ async fn guard<B: Backend>(
     headers: &HeaderMap,
     want: &str,
 ) -> Result<(), WebError> {
-    let ip = super::client_ip(state, addr, headers);
+    let ip = addr.ip();
     // Refuse a saturated IP with 429 before the expensive check. Records
     // nothing: only failures below consume quota.
     if state.limits.metrics_saturated(ip).await {

@@ -951,11 +951,6 @@
     }
   }
 
-  .banners {
-    display: flex;
-    flex-direction: column;
-  }
-
   .banner,
   .eyebrow__in,
   .foot__bottom {

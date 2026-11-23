@@ -138,7 +138,7 @@ async fn serve(
     backend: Arc<wgez::web::backend::SqliteBackend>,
 ) -> Result<(), String> {
     let locales = wgez::web::Locales::load().map_err(|e| format!("locales error: {e}"))?;
-    let state = wgez::web::AppState::new(backend.clone(), locales, config.trusted_proxies.clone());
+    let state = wgez::web::AppState::new(backend.clone(), locales);
     let app = wgez::web::build_router(state);
 
     let addr = format!("{}:{}", config.host, config.port);

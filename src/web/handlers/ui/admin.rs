@@ -253,7 +253,7 @@ pub async fn admin_page<B: Backend>(
     headers: HeaderMap,
     Query(q): Query<LangQuery>,
 ) -> Result<Response, WebError> {
-    let ip = super::super::client_ip(&state, addr, &headers);
+    let ip = addr.ip();
     let (prefs, auth) = match page_context(&state, &jar, &headers, Some(ip), q.prefs()).await {
         Ok(ctx) => ctx,
         Err(r) => return Ok(*r),

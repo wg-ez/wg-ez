@@ -69,10 +69,9 @@ pub(crate) fn bearer_credential(headers: &HeaderMap) -> Option<String> {
 /// Resolve the request principal: session cookie first, then Bearer API
 /// token. Missing/invalid credentials -> 401; backend failure -> 500.
 ///
-/// `ip` is the trusted-proxy-aware client IP used to throttle Bearer
-/// credential failures. It is optional so a caller without `ConnectInfo`
-/// (e.g. a direct unit call) **fails open** — no throttling — instead of
-/// refusing a legitimate request.
+/// `ip` is the direct peer IP used to throttle Bearer credential failures. It
+/// is optional so a caller without `ConnectInfo` (e.g. a direct unit call)
+/// **fails open** — no throttling — instead of refusing a legitimate request.
 pub async fn authenticate<B: Backend>(
     state: &AppState<B>,
     jar: &CookieJar,
@@ -182,14 +181,14 @@ impl<B: Backend> FromRequestParts<AppState<B>> for Auth {
         parts: &mut Parts,
         state: &AppState<B>,
     ) -> Result<Self, Self::Rejection> {
-        // Direct peer (injected by `into_make_service_with_connect_info`)
-        // resolved through the trusted-proxy chain. Missing `ConnectInfo`
-        // (e.g. a direct unit call) fails open: no credential throttling.
+        // Direct peer (injected by `into_make_service_with_connect_info`).
+        // Missing `ConnectInfo` (e.g. a direct unit call) fails open: no
+        // credential throttling.
         let direct = parts
             .extensions
             .get::<ConnectInfo<SocketAddr>>()
             .map(|ci| ci.0);
-        let ip = direct.map(|addr| super::handlers::client_ip(state, addr, &parts.headers));
+        let ip = direct.map(|addr| addr.ip());
         let jar = CookieJar::from_request_parts(parts, state)
             .await
             .map_err(|_| WebError::unauthorized("authentication required"))?;

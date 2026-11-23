@@ -208,12 +208,10 @@ mod tests {
         let config = crate::config::AppConfig {
             host: "0.0.0.0".to_string(),
             port: 51821,
-            insecure: true,
             disable_ipv6: false,
             disable_ipv4: false,
             disable_password_auth: false,
             wg_interface: "wg0".to_string(),
-            trusted_proxies: Vec::new(),
             db_path: db.display().to_string(),
             wg_conf_dir: dir.display().to_string(),
             init: None,

@@ -12,12 +12,6 @@
     <script src="/static/js/app.js" defer></script>
   </head>
   <body data-lang="{{ base.lang }}">
-    {% if base.insecure %}
-      <div class="banners">
-        {{ chrome::banner(base.tr.b_insecure) }}
-      </div>
-    {% endif %}
-
     <nav class="nav">
       <div class="nav__in">
         <div class="nav__left">

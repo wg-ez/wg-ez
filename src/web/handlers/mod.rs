@@ -7,22 +7,45 @@
 //! `POST /api/client/:id/generateOneTimeLink`. The single place this is
 //! allowed to be skipped is [`client::generate_otl`].
 
-use axum::http::HeaderMap;
+use axum::http::{HeaderMap, header};
 use axum::response::IntoResponse;
 
 use super::ctx::{AppState, Backend, ClientView, WebError};
 
-/// Client IP for rate limiting: the direct peer unless it is a trusted proxy,
-/// in which case `X-Forwarded-For` is walked right-to-left. Single
-/// implementation shared by the auth / metrics / cnf handlers
-/// (`AppState::client_ip`).
-pub(crate) fn client_ip<B: Backend>(
-    state: &AppState<B>,
-    addr: std::net::SocketAddr,
-    headers: &HeaderMap,
-) -> std::net::IpAddr {
-    let fwd = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok());
-    state.client_ip(Some(addr.ip()), fwd).unwrap_or(addr.ip())
+/// Scheme the browser used for this request, read from the request metadata
+/// the browser itself controls: `Origin` on fetch/form mutations, `Referer`
+/// as a fallback. `None` when neither is present or the origin is opaque
+/// (`Origin: null`).
+///
+/// This is deliberately *not* `X-Forwarded-Proto`: TLS terminates at the
+/// reverse proxy, so the browser-visible scheme is the one that decides
+/// whether the browser will accept a `Secure` cookie, and `Origin` is set by
+/// the browser (page JS cannot forge it).
+fn browser_https(headers: &HeaderMap) -> Option<bool> {
+    fn parse(value: &str) -> Option<bool> {
+        let value = value.trim();
+        if value.len() >= 8 && value[..8].eq_ignore_ascii_case("https://") {
+            Some(true)
+        } else if value.len() >= 7 && value[..7].eq_ignore_ascii_case("http://") {
+            Some(false)
+        } else {
+            None
+        }
+    }
+    [header::ORIGIN, header::REFERER]
+        .iter()
+        .find_map(|name| headers.get(name)?.to_str().ok().and_then(parse))
+}
+
+/// `Secure` flag for the session and pending-2FA cookies.
+///
+/// The flag follows the scheme the browser reports: dropping `Secure` when it
+/// says `http://` is what makes login/setup work on plain HTTP, while an HTTPS
+/// browser (direct or behind a reverse proxy) keeps the flag. Unknown scheme
+/// keeps `Secure`, so a client that sends neither `Origin` nor `Referer`
+/// cannot downgrade a real HTTPS deployment.
+pub(crate) fn cookie_secure(headers: &HeaderMap) -> bool {
+    browser_https(headers) != Some(false)
 }
 
 /// Refuse (429) an authenticated tunnel mutation once the origin IP has
@@ -35,10 +58,8 @@ pub(crate) fn client_ip<B: Backend>(
 pub(crate) async fn check_mutation_limit<B: Backend>(
     state: &AppState<B>,
     addr: std::net::SocketAddr,
-    headers: &HeaderMap,
 ) -> Result<(), WebError> {
-    let ip = client_ip(state, addr, headers);
-    if !state.limits.check_mutation(ip).await {
+    if !state.limits.check_mutation(addr.ip()).await {
         return Err(WebError::rate_limited("too many mutations"));
     }
     Ok(())

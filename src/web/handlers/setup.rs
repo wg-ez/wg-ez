@@ -57,10 +57,11 @@ async fn require_setup<B: Backend>(state: &AppState<B>, step: i64) -> Result<(),
 }
 
 /// `wg-ez` `Set-Cookie` value for a freshly minted session (always a
-/// browser-session cookie, `secure = !INSECURE`). Reuses the canonical
+/// browser-session cookie, `secure` decided per request by
+/// [`super::cookie_secure`]). Reuses the canonical
 /// [`crate::auth::session::build_set_cookie`] used by `auth::password`.
-fn session_cookie(token: &str, insecure: bool) -> String {
-    crate::auth::session::build_set_cookie(token, !insecure)
+fn session_cookie(token: &str, secure: bool) -> String {
+    crate::auth::session::build_set_cookie(token, secure)
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,11 +76,7 @@ pub async fn step2<B: Backend>(
     headers: HeaderMap,
     JsonOrForm(body): JsonOrForm<AdminBody>,
 ) -> Result<Response, WebError> {
-    if !state
-        .limits
-        .check_setup(super::client_ip(&state, addr, &headers))
-        .await
-    {
+    if !state.limits.check_setup(addr.ip()).await {
         return Err(WebError::rate_limited("too many setup attempts"));
     }
     require_setup(&state, 2).await?;
@@ -101,7 +98,7 @@ pub async fn step2<B: Backend>(
     let resp = (
         [(
             header::SET_COOKIE,
-            session_cookie(&token, state.backend.insecure()),
+            session_cookie(&token, super::cookie_secure(&headers)),
         )],
         Json(json!({ "ok": true, "step": 3 })),
     )
@@ -115,13 +112,8 @@ pub async fn suggest<B: Backend>(
     State(state): State<AppState<B>>,
     ConnectInfo(addr): ConnectInfo<std::net::SocketAddr>,
     auth: Auth,
-    headers: HeaderMap,
 ) -> Result<Json<Value>, WebError> {
-    if !state
-        .limits
-        .check_setup(super::client_ip(&state, addr, &headers))
-        .await
-    {
+    if !state.limits.check_setup(addr.ip()).await {
         return Err(WebError::rate_limited("too many setup attempts"));
     }
     require_setup(&state, 3).await?;
@@ -145,11 +137,7 @@ pub async fn step3<B: Backend>(
     headers: HeaderMap,
     JsonOrForm(body): JsonOrForm<HostBody>,
 ) -> Result<Response, WebError> {
-    if !state
-        .limits
-        .check_setup(super::client_ip(&state, addr, &headers))
-        .await
-    {
+    if !state.limits.check_setup(addr.ip()).await {
         return Err(WebError::rate_limited("too many setup attempts"));
     }
     require_setup(&state, 3).await?;

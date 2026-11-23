@@ -60,7 +60,7 @@ macro_rules! pair {
             headers: HeaderMap,
             PatchBody { patch, is_json }: PatchBody,
         ) -> Result<Response, WebError> {
-            super::check_mutation_limit(&state, addr, &headers).await?;
+            super::check_mutation_limit(&state, addr).await?;
             admin(&auth)?;
             // `wg syncconf` répercute à chaud les pairs, ListenPort et le
             // firewall, mais PAS MTU/Table/Address/hooks : si l'un de ces
@@ -146,7 +146,7 @@ pub async fn change_cidr<B: Backend>(
     headers: HeaderMap,
     JsonOrForm(body): JsonOrForm<CidrBody>,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     admin(&auth)?;
     // Un changement de CIDR change l'`Address` du serveur : non répercutable
     // à chaud, donc `down`+`up` si la valeur a réellement bougé.
@@ -177,7 +177,7 @@ pub async fn restart<B: Backend>(
     Auth(auth): Auth,
     headers: HeaderMap,
 ) -> Result<Response, WebError> {
-    super::check_mutation_limit(&state, addr, &headers).await?;
+    super::check_mutation_limit(&state, addr).await?;
     admin(&auth)?;
     // Explicit admin button: `down` then `up`, cuts tunnels.
     state.backend.restart_interface().await?;

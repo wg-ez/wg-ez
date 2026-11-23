@@ -2,7 +2,7 @@
 
 //! Setup gating for the web layer.
 
-use super::{SETUP_DONE, SetupError};
+use super::{SETUP_DONE, SETUP_ENDPOINT, SetupError};
 
 /// Setup API entry points.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub fn check_setup_step(current: i64, requested: RequestedSetupStep) -> Result<(
     }
     let allowed = match current {
         1 => requested == RequestedSetupStep::Step2,
-        3 => requested == RequestedSetupStep::Step3,
+        SETUP_ENDPOINT => requested == RequestedSetupStep::Step3,
         _ => {
             return Err(SetupError::State("invalid setup step".to_string()));
         }
@@ -39,11 +39,16 @@ pub fn check_setup_step(current: i64, requested: RequestedSetupStep) -> Result<(
 /// Page middleware: while unfinished, any non-setup page redirects
 /// to `/setup/<step>`; once finished, `/setup/*` redirects to `/login`.
 /// Setup API calls (`/api/setup/*`) always pass through.
+///
+/// Exception: at [`SETUP_ENDPOINT`] the admin already exists, so `/login`
+/// stays reachable. Without this, a browser that refused the step-2 session
+/// cookie (e.g. `Secure` over plain HTTP) could never authenticate again.
 pub fn setup_page_redirect(setup_step: i64, path: &str) -> Option<String> {
     let is_setup_page = path == "/setup" || path.starts_with("/setup/");
     let is_setup_api = path.starts_with("/api/setup/");
+    let is_relogin = setup_step == SETUP_ENDPOINT && path == "/login";
     if setup_step != SETUP_DONE {
-        if is_setup_page || is_setup_api {
+        if is_setup_page || is_setup_api || is_relogin {
             None
         } else {
             Some(format!("/setup/{setup_step}"))
@@ -79,10 +84,17 @@ mod tests {
             Some("/setup/3".to_string())
         );
         assert_eq!(setup_page_redirect(3, "/api/setup/3"), None);
+        // At the endpoint step the admin exists: re-login must stay possible.
+        assert_eq!(setup_page_redirect(3, "/login"), None);
+        assert_eq!(
+            setup_page_redirect(1, "/login"),
+            Some("/setup/1".to_string())
+        );
         assert_eq!(
             setup_page_redirect(0, "/setup/1"),
             Some("/login".to_string())
         );
         assert_eq!(setup_page_redirect(0, "/"), None);
+        assert_eq!(setup_page_redirect(0, "/login"), None);
     }
 }

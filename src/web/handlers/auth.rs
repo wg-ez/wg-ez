@@ -28,8 +28,9 @@
 //! client IP across all usernames. `verify-2fa` only runs the coarse IP bucket
 //! because the username is not resolved before the pending lookup; the code
 //! brute-force is already bounded by the per-pending attempt budget (M2).
-//! Session cookie: `wg-ez`, `secure = !INSECURE`, always a
-//! browser-session cookie (no `Max-Age`): closing the browser forgets it.
+//! Session cookie: `wg-ez`, `secure` follows the browser-visible scheme
+//! ([`super::cookie_secure`]), always a browser-session cookie (no `Max-Age`):
+//! closing the browser forgets it.
 
 use std::time::{Duration, Instant};
 
@@ -74,26 +75,27 @@ pub struct PasswordBody {
     pub password: String,
 }
 
-fn session_cookie(token: &str, insecure: bool) -> String {
-    crate::auth::session::build_set_cookie(token, !insecure)
+fn session_cookie(token: &str, secure: bool) -> String {
+    crate::auth::session::build_set_cookie(token, secure)
 }
 
 /// Pending 2FA login lifetime: the in-memory `PendingLogin` and its cookie
 /// expire together.
 const PENDING_TTL_SECS: u64 = 300;
 
-/// Pending-2FA cookie: same hardening as the session cookie (`Secure` iff
-/// `!INSECURE`), scoped to `/api/auth` and expiring with the pending.
+/// Pending-2FA cookie: same hardening as the session cookie (`secure` decided
+/// per request by [`super::cookie_secure`]), scoped to `/api/auth` and expiring
+/// with the pending.
 ///
 /// Shares [`crate::auth::session::build_cookie`] with `build_set_cookie` so the
 /// `Secure` flag can never diverge and leak the opaque id over cleartext on an
 /// HTTPS deployment (M8).
-fn pending_cookie(id: &str, insecure: bool) -> String {
+fn pending_cookie(id: &str, secure: bool) -> String {
     crate::auth::session::build_cookie(
         PENDING_COOKIE,
         id,
         "/api/auth",
-        !insecure,
+        secure,
         Some(PENDING_TTL_SECS),
     )
 }
@@ -102,8 +104,8 @@ fn pending_cookie(id: &str, insecure: bool) -> String {
 /// policy as [`pending_cookie`] but `Max-Age=0`, so the opaque id never lingers
 /// in the browser once the pending is consumed (`verify-2fa`) or abandoned
 /// (`cancel`).
-fn clear_pending_cookie(insecure: bool) -> String {
-    crate::auth::session::build_cookie(PENDING_COOKIE, "", "/api/auth", !insecure, Some(0))
+fn clear_pending_cookie(secure: bool) -> String {
+    crate::auth::session::build_cookie(PENDING_COOKIE, "", "/api/auth", secure, Some(0))
 }
 
 pub async fn password<B: Backend>(
@@ -114,10 +116,8 @@ pub async fn password<B: Backend>(
 ) -> Result<Response, WebError> {
     // M1: two independent bounds. The fine `(IP, username)` bucket means an
     // attacker cannot lock out other accounts from a shared origin; the
-    // coarse per-IP bucket bounds spraying across many usernames. Behind an
-    // undeclared proxy both keys collapse to the proxy IP (set
-    // `TRUSTED_PROXIES` to recover per-client granularity).
-    let ip = super::client_ip(&state, addr, &headers);
+    // coarse per-IP bucket bounds spraying across many usernames.
+    let ip = addr.ip();
     if !state.limits.check_login_user(ip, &body.username).await
         || !state.limits.check_login_ip(ip).await
     {
@@ -126,13 +126,14 @@ pub async fn password<B: Backend>(
     if body.username.len() > crate::validate::MAX_USERNAME_LEN || body.password.len() > 1024 {
         return Err(WebError::unauthorized("invalid credentials").with_seclog("password"));
     }
+    let secure = super::cookie_secure(&headers);
     match state
         .backend
         .login_password(&body.username, &body.password)
         .await?
     {
         LoginOutcome::Ok { user: _, token } => {
-            let hdr = session_cookie(&token, state.backend.insecure());
+            let hdr = session_cookie(&token, secure);
             let resp = ([(header::SET_COOKIE, hdr)], Json(json!({ "ok": true }))).into_response();
             Ok(with_hx(resp, &headers, Some("/"), None))
         }
@@ -157,10 +158,7 @@ pub async fn password<B: Backend>(
                 );
             }
             let resp = (
-                [(
-                    header::SET_COOKIE,
-                    pending_cookie(&id, state.backend.insecure()),
-                )],
+                [(header::SET_COOKIE, pending_cookie(&id, secure))],
                 Json(json!({ "totpRequired": true, "pending": id })),
             )
                 .into_response();
@@ -179,11 +177,7 @@ pub async fn pending<B: Backend>(
 ) -> Result<Json<Value>, WebError> {
     // This route is a public pending-id validity oracle: bound it before any
     // lookup with a dedicated per-IP bucket (never the login budget).
-    if !state
-        .limits
-        .check_pending(super::client_ip(&state, addr, &headers))
-        .await
-    {
+    if !state.limits.check_pending(addr.ip()).await {
         return Err(WebError::rate_limited("too many requests"));
     }
     let Some(i) = pending_id_from(&headers) else {
@@ -236,11 +230,7 @@ pub async fn verify_2fa<B: Backend>(
     // M1: the username is only resolved *after* the pending lookup, so this
     // route keeps the coarse per-IP bound. Brute-forcing a code is separately
     // capped at `PendingLogin::MAX_FAILED_ATTEMPTS` per pending (M2).
-    if !state
-        .limits
-        .check_login_ip(super::client_ip(&state, addr, &headers))
-        .await
-    {
+    if !state.limits.check_login_ip(addr.ip()).await {
         return Err(WebError::rate_limited("too many login attempts"));
     }
     if crate::validate::validate_totp_code(&body.code).is_err() {
@@ -296,16 +286,11 @@ pub async fn verify_2fa<B: Backend>(
         }
     };
     let token = state.backend.create_session(pend.user_id).await?;
+    let secure = super::cookie_secure(&headers);
     let resp = (
         AppendHeaders([
-            (
-                header::SET_COOKIE,
-                session_cookie(&token, state.backend.insecure()),
-            ),
-            (
-                header::SET_COOKIE,
-                clear_pending_cookie(state.backend.insecure()),
-            ),
+            (header::SET_COOKIE, session_cookie(&token, secure)),
+            (header::SET_COOKIE, clear_pending_cookie(secure)),
         ]),
         Json(json!({ "ok": true })),
     )
@@ -326,7 +311,7 @@ pub async fn cancel<B: Backend>(
     let resp = (
         [(
             header::SET_COOKIE,
-            clear_pending_cookie(state.backend.insecure()),
+            clear_pending_cookie(super::cookie_secure(&headers)),
         )],
         Json(json!({ "ok": true })),
     )

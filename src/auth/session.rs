@@ -5,8 +5,9 @@
 //! - Session token: 256 random bits, transported as base64url in the
 //!   `wg-ez` cookie; only its SHA-256 hex is stored in DB.
 //! - Cookie flags: `HttpOnly`, `SameSite=Lax`, `Path=/`,
-//!   `Secure` iff `!INSECURE`. The session cookie is always a
-//!   browser-session cookie (no `Max-Age`): closing the browser forgets it.
+//!   `Secure` decided by the caller (`web::handlers::cookie_secure`: per-request
+//!   browser scheme). The session cookie is always a browser-session cookie
+//!   (no `Max-Age`): closing the browser forgets it.
 //!
 //! The pending 2FA login store lives in the web layer
 //! (`crate::web::ctx::PendingLogin`).
@@ -73,7 +74,8 @@ pub fn generate_token_pair() -> Result<(String, String), SessionError> {
 /// name, `Path` and optional `Max-Age`.
 ///
 /// Single source of truth for the session cookie *and* the pending-2FA
-/// cookie, so their flags can never diverge. `Secure` must be `!INSECURE`.
+/// cookie, so their flags can never diverge. `secure` comes from
+/// [`crate::web::handlers::cookie_secure`].
 pub fn build_cookie(
     name: &str,
     value: &str,
@@ -92,8 +94,8 @@ pub fn build_cookie(
 }
 
 /// Build the `wg-ez` `Set-Cookie` header value. Always a browser-session
-/// cookie (no `Max-Age`): closing the browser forgets it. `secure` must be
-/// `!INSECURE`.
+/// cookie (no `Max-Age`): closing the browser forgets it. `secure` comes from
+/// [`crate::web::handlers::cookie_secure`].
 pub fn build_set_cookie(token_b64: &str, secure: bool) -> String {
     build_cookie(SESSION_COOKIE_NAME, token_b64, "/", secure, None)
 }
@@ -121,7 +123,7 @@ mod tests {
     }
 
     #[test]
-    fn cookie_flags_follow_insecure() {
+    fn cookie_flags_follow_secure_argument() {
         let secured = build_cookie("wg-ez", "tok", "/", true, None);
         assert!(secured.contains("; Secure"));
         assert!(!secured.contains("Max-Age"));

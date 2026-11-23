@@ -12,9 +12,6 @@
 //!   empty, routing table `auto` | `off` | number, TOTP exactly 6 digits,
 //!   password 12+ characters, `serverAllowedIps` entries a bare IP or a CIDR,
 //!   DNS entries a bare IPv4/IPv6 address of the right family.
-//!
-//! Trusted-proxy client-IP resolution lives in the web layer
-//! (`crate::web::ctx::AppState::client_ip`).
 
 /// Minimum password length. Single source of truth:
 /// [`crate::auth::password::MIN_PASSWORD_LEN`].

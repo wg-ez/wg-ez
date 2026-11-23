@@ -10,7 +10,7 @@
 //!
 //! Residual accepted risk: before step 2 completes the route is open ("trust
 //! on first use") — anyone reaching an exposed, unconfigured instance can
-//! claim the first admin, so expose the instance only on a trusted network
+//! claim the first admin, so expose the instance only on a private network
 //! until setup finishes.
 
 use super::{ADMIN_DISPLAY_NAME, SetupError};

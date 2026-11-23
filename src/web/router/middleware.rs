@@ -15,21 +15,12 @@ use crate::web::ctx::{AppState, Backend, WebError};
 /// zero inline script/style (all JS in `static/js/app.js`), policy from the
 /// shared constant in [`crate::validate`].
 ///
-/// Needs the shared state only to read the `INSECURE` flag backing
-/// [`Backend::insecure`]: HSTS makes sense only when TLS terminates in front,
-/// so it is omitted on plain HTTP (`INSECURE=true`).
-///
 /// Cache policy (I7): every dynamic response is `no-store` so no proxy or
 /// browser can retain an authenticated page, a JSON body or the `.conf`
 /// carrying the client private key. The static asset handler sets its own
 /// `Cache-Control`, which is left untouched so its `304` revalidation keeps
 /// working; `Vary: Cookie` travels with the `no-store`.
-pub(crate) async fn security_headers<B: Backend>(
-    State(state): State<AppState<B>>,
-    req: Request,
-    next: Next,
-) -> Response {
-    let insecure = state.backend.insecure();
+pub(crate) async fn security_headers(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
     let h = res.headers_mut();
     h.insert(
@@ -45,14 +36,12 @@ pub(crate) async fn security_headers<B: Backend>(
         header::REFERRER_POLICY,
         HeaderValue::from_static("same-origin"),
     );
-    // HSTS only when TLS is in play; on plain HTTP it would pin the browser
-    // to HTTPS and break the deployment.
-    if !insecure {
-        h.insert(
-            header::STRICT_TRANSPORT_SECURITY,
-            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-        );
-    }
+    // HSTS: a browser only honors it over HTTPS, so sending it on plain HTTP
+    // is inert and sending it always keeps the HTTPS path protected.
+    h.insert(
+        header::STRICT_TRANSPORT_SECURITY,
+        HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+    );
     // Deny browser features the app never uses (`()` = no origin, so frames
     // cannot re-enable them either).
     h.insert(
